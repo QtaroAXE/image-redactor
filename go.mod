@@ -1,6 +1,6 @@
 module github.com/QtaroAXE/image-redactor
 
-go 1.22
+go 1.23
 
 require (
 	github.com/eringen/gowebper v0.1.2
