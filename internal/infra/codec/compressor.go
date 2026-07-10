@@ -13,8 +13,10 @@ import (
 	"image/jpeg"
 	"image/png"
 	"os"
-	"os/exec"
 	"path/filepath"
+
+	"github.com/eringen/gowebper"
+	"golang.org/x/image/webp"
 
 	"github.com/QtaroAXE/image-redactor/internal/domain/compression"
 	apperrors "github.com/QtaroAXE/image-redactor/internal/domain/errors"
@@ -97,17 +99,25 @@ func (s *CompressorService) CompressImage(src imginfo.SourceImage, target imginf
 }
 
 // decodeImage читает файл источника и декодирует его в image.Image.
-// Для WebP используется системная утилита dwebp (см. комментарий у encodeWebP),
-// так как в стандартной библиотеке Go декодера WebP нет, а сторонние Go-пакеты
-// мы намеренно не подключаем.
+// Для WebP используется чистая Go-библиотека golang.org/x/image/webp -
+// ничего устанавливать в системе не нужно, всё работает "из коробки"
+// после go mod tidy.
 func (s *CompressorService) decodeImage(src imginfo.SourceImage) (image.Image, error) {
-	if src.Format().Equals("webp") {
-		return s.decodeWebPViaDwebp(src.Path())
-	}
-
 	data, err := s.fs.ReadFile(src.Path())
 	if err != nil {
 		return nil, err
+	}
+
+	if src.Format().Equals("webp") {
+		img, err := webp.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, apperrors.WrapWithFile(
+				err,
+				apperrors.TypeDecode,
+				"не удалось декодировать WebP изображение",
+			).WithPath(src.Path())
+		}
+		return img, nil
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(data))
@@ -170,87 +180,30 @@ func (s *CompressorService) encodePNG(img image.Image, path string, level compre
 
 // encodeWebP сохраняет изображение в формате WebP.
 //
-// В стандартной библиотеке Go нет кодировщика WebP, а полноценная реализация
-// формата WebP с нуля (энтропийное кодирование, предсказания и т.д.) - это
-// тысячи строк кода, которые невозможно надёжно написать и проверить без
-// возможности собрать и прогнать проект. Поэтому вместо стороннего Go-пакета
-// с GitHub мы используем системную консольную утилиту cwebp из пакета libwebp:
-// она ставится через менеджер пакетов ОС (не через "go get"), например:
-//
-//	Ubuntu/Debian: sudo apt install webp
-//	macOS (Homebrew): brew install webp
-//	Windows: скачать сборку с https://developers.google.com/speed/webp/download
-//
-// Если утилита не установлена - функция вернёт понятную ошибку, а не панику.
+// Используется чистая Go-библиотека github.com/eringen/gowebper: она кодирует
+// в формат VP8L (WebP lossless) без cgo и без системных зависимостей вроде
+// libwebp/cwebp - достаточно "go mod tidy". Значение quality (1-100) управляет
+// параметром Options.Quality библиотеки: это не совсем то же самое, что
+// "качество" в классическом lossy JPEG, а управление предварительным
+// квантованием цвета перед lossless-упаковкой (чем меньше quality - тем
+// сильнее огрубление цвета и меньше файл, при 100 - почти без потерь).
+// Итоговый файл в любом случае остаётся корректным WebP, читается браузерами
+// и любым просмотрщиком WebP.
 func (s *CompressorService) encodeWebP(img image.Image, path string, quality compression.Quality) error {
-	if _, err := exec.LookPath("cwebp"); err != nil {
-		return apperrors.New(
-			apperrors.TypeUnsupported,
-			"для сохранения в WebP требуется установленная утилита cwebp (пакет libwebp); используйте формат JPEG или PNG, либо установите libwebp",
-		)
-	}
-
-	tmpPNG, err := os.CreateTemp("", "image-redactor-*.png")
+	out, err := os.Create(path)
 	if err != nil {
-		return apperrors.WrapWithFile(err, apperrors.TypeInternal, "не удалось создать временный файл")
+		return apperrors.WrapWithFile(err, apperrors.TypeIO, "не удалось создать файл результата").WithPath(path)
 	}
-	tmpPath := tmpPNG.Name()
-	defer os.Remove(tmpPath)
+	defer out.Close()
 
-	if err := png.Encode(tmpPNG, img); err != nil {
-		tmpPNG.Close()
-		return apperrors.WrapWithFile(err, apperrors.TypeEncode, "не удалось подготовить временный PNG для WebP")
+	opts := &gowebper.Options{
+		Level:   gowebper.LevelDefault,
+		Quality: quality.Value(),
 	}
-	tmpPNG.Close()
-
-	cmd := exec.Command("cwebp", "-quiet", "-q", fmt.Sprintf("%d", quality.Value()), tmpPath, "-o", path)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return apperrors.WrapWithFile(
-			fmt.Errorf("%s: %s", err, string(out)),
-			apperrors.TypeEncode,
-			"утилита cwebp завершилась с ошибкой",
-		).WithPath(path)
+	if err := gowebper.Encode(out, img, opts); err != nil {
+		return apperrors.WrapWithFile(err, apperrors.TypeEncode, "не удалось закодировать WebP").WithContext("quality", quality.Value())
 	}
 	return nil
-}
-
-// decodeWebPViaDwebp конвертирует WebP-файл во временный PNG с помощью
-// системной утилиты dwebp (тот же пакет libwebp, что и cwebp) и декодирует
-// результат стандартными средствами Go.
-func (s *CompressorService) decodeWebPViaDwebp(path string) (image.Image, error) {
-	if _, err := exec.LookPath("dwebp"); err != nil {
-		return nil, apperrors.New(
-			apperrors.TypeUnsupported,
-			"для чтения WebP-файлов требуется установленная утилита dwebp (пакет libwebp)",
-		).WithPath(path)
-	}
-
-	tmpPNG, err := os.CreateTemp("", "image-redactor-src-*.png")
-	if err != nil {
-		return nil, apperrors.WrapWithFile(err, apperrors.TypeInternal, "не удалось создать временный файл")
-	}
-	tmpPath := tmpPNG.Name()
-	tmpPNG.Close()
-	defer os.Remove(tmpPath)
-
-	cmd := exec.Command("dwebp", "-quiet", path, "-o", tmpPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, apperrors.WrapWithFile(
-			fmt.Errorf("%s: %s", err, string(out)),
-			apperrors.TypeDecode,
-			"утилита dwebp завершилась с ошибкой",
-		).WithPath(path)
-	}
-
-	data, err := os.ReadFile(tmpPath)
-	if err != nil {
-		return nil, apperrors.WrapWithFile(err, apperrors.TypeIO, "не удалось прочитать результат dwebp")
-	}
-	img, err := png.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, apperrors.WrapWithFile(err, apperrors.TypeDecode, "не удалось декодировать результат dwebp")
-	}
-	return img, nil
 }
 
 // mapCompressionLevel переводит уровень сжатия 1..10 в шкалу png.CompressionLevel.
