@@ -2,28 +2,32 @@ package imginfo
 
 import (
 	"fmt"
-	apperrors "github.com/QtaroAXE/image-redactor/internal/domain/errors"
 	"strings"
+
+	apperrors "github.com/QtaroAXE/image-redactor/internal/domain/errors"
 )
 
+// SourceImage - описание исходного изображения: где лежит, в каком формате,
+// какого размера. Ширина/высота необязательны (0 значит "неизвестно").
 type SourceImage struct {
 	path      string
 	format    Format
 	sizeBytes int64
-	width     int // 0 means "unknown"
-	height    int // 0 means "unknown"
+	width     int // 0 - размер неизвестен
+	height    int // 0 - размер неизвестен
 }
 
+// NewSourceImage создаёт исходное изображение с проверкой входных данных.
 func NewSourceImage(path string, format Format, sizeBytes int64) (SourceImage, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
-		return SourceImage{}, apperrors.New(apperrors.TypeInvalidInput, "path cannot be empty")
+		return SourceImage{}, apperrors.New(apperrors.TypeInvalidInput, "путь к файлу не может быть пустым")
 	}
 	if format.IsZero() {
-		return SourceImage{}, apperrors.New(apperrors.TypeInvalidInput, "format cannot be empty")
+		return SourceImage{}, apperrors.New(apperrors.TypeInvalidInput, "формат изображения не указан")
 	}
 	if sizeBytes < 0 {
-		return SourceImage{}, apperrors.New(apperrors.TypeInvalidInput, "size cannot be lower than 0").WithContext("size_bytes", sizeBytes)
+		return SourceImage{}, apperrors.New(apperrors.TypeInvalidInput, "размер файла не может быть отрицательным").WithContext("size_bytes", sizeBytes)
 	}
 	return SourceImage{
 		path:      trimmed,
@@ -32,9 +36,11 @@ func NewSourceImage(path string, format Format, sizeBytes int64) (SourceImage, e
 	}, nil
 }
 
+// WithDimensions возвращает копию изображения с заданными шириной и высотой.
+// Исходный объект не изменяется (иммутабельность).
 func (s SourceImage) WithDimensions(width, height int) (SourceImage, error) {
 	if width <= 0 || height <= 0 {
-		return SourceImage{}, fmt.Errorf("image: dimensions must be positive, got %dx%d", width, height)
+		return SourceImage{}, fmt.Errorf("изображение: ширина и высота должны быть положительными, получено %dx%d", width, height)
 	}
 	s.width = width
 	s.height = height

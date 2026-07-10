@@ -1,0 +1,8 @@
+{
+  "input": "./input",
+  "output": "./output",
+  "processed": "./processed",
+  "errors": "./errors",
+  "workers": 4,
+  "quality": 85
+}

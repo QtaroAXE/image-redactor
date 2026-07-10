@@ -1,4 +1,8 @@
-// pkg/errors/errors.go
+// Package errors содержит собственный тип ошибки приложения (AppError),
+// который добавляет к обычной ошибке тип, контекст и место возникновения.
+// Названа "errors", а не "apperrors", исторически; во всех остальных файлах
+// пакет импортируется под псевдонимом apperrors, чтобы не путать со
+// стандартным пакетом "errors".
 package errors
 
 import (
@@ -8,22 +12,25 @@ import (
 	"time"
 )
 
+// AppError - структурированная ошибка приложения.
 type AppError struct {
-	Time time.Time `json:"time"`
+	Time time.Time `json:"time"` // когда произошла ошибка
 
-	Type string `json:"type"`
+	Type string `json:"type"` // категория ошибки (см. константы Type* ниже)
 
-	Message string `json:"message"`
+	Message string `json:"message"` // человекочитаемое описание
 
-	Err error `json:"-"`
+	Err error `json:"-"` // исходная ошибка, если есть (для Unwrap)
 
-	Context map[string]interface{} `json:"context,omitempty"`
+	Context map[string]interface{} `json:"context,omitempty"` // дополнительные данные
 
-	File     string `json:"file,omitempty"`     // имя файла
-	Line     int    `json:"line,omitempty"`     // номер строки
-	Function string `json:"function,omitempty"` // имя функции
+	File     string `json:"file,omitempty"`     // файл, где создана ошибка
+	Line     int    `json:"line,omitempty"`     // строка
+	Function string `json:"function,omitempty"` // функция
 }
 
+// Категории ошибок. Используются, например, чтобы решить,
+// стоит ли повторить операцию (см. isRetryableError в pipeline).
 const (
 	TypeInvalidInput  = "INVALID_INPUT"
 	TypeNotFound      = "NOT_FOUND"
@@ -40,6 +47,7 @@ const (
 	TypeTimeout       = "TIME_OUT"
 )
 
+// New создаёт новую ошибку приложения без "родительской" ошибки.
 func New(errType, message string) *AppError {
 	err := &AppError{
 		Time:    time.Now(),
@@ -51,10 +59,13 @@ func New(errType, message string) *AppError {
 	return err
 }
 
+// NewWithFile - то же самое, что New (оставлено для обратной совместимости вызовов).
 func NewWithFile(errType, message string) *AppError {
 	return New(errType, message)
 }
 
+// Wrap оборачивает существующую ошибку err, добавляя тип и сообщение.
+// Если err == nil, возвращает nil (удобно использовать сразу после вызова функции).
 func Wrap(err error, errType, message string) *AppError {
 	if err == nil {
 		return nil
@@ -70,10 +81,14 @@ func Wrap(err error, errType, message string) *AppError {
 	return appErr
 }
 
+// WrapWithFile - то же самое, что Wrap (оставлено для обратной совместимости вызовов).
 func WrapWithFile(err error, errType, message string) *AppError {
 	return Wrap(err, errType, message)
 }
 
+// captureFileInfo запоминает файл, строку и функцию, в которой была создана ошибка.
+// skip - сколько уровней стека пропустить, чтобы попасть в код вызывающей стороны,
+// а не внутрь самого пакета errors.
 func (e *AppError) captureFileInfo(skip int) {
 	pc, file, line, ok := runtime.Caller(skip)
 	if ok {
@@ -87,6 +102,7 @@ func (e *AppError) captureFileInfo(skip int) {
 	}
 }
 
+// Error реализует интерфейс error. Формат: [ТИП] (файл:строка) сообщение: причина.
 func (e *AppError) Error() string {
 	location := ""
 	if e.File != "" {
@@ -99,21 +115,24 @@ func (e *AppError) Error() string {
 	return fmt.Sprintf("[%s]%s %s", e.Type, location, e.Message)
 }
 
+// Unwrap позволяет использовать errors.Is / errors.As из стандартной библиотеки.
 func (e *AppError) Unwrap() error {
 	return e.Err
 }
 
+// WithContext добавляет произвольную пару ключ-значение в контекст ошибки.
 func (e *AppError) WithContext(key string, value interface{}) *AppError {
 	e.Context[key] = value
 	return e
 }
 
+// WithPath добавляет путь к файлу, с которым связана ошибка.
 func (e *AppError) WithPath(path string) *AppError {
 	e.Context["path"] = path
 	return e
 }
 
-// WithWorker - добавляет ID воркера (в контекст)
+// WithWorker добавляет id воркера, в котором произошла ошибка.
 func (e *AppError) WithWorker(id int) *AppError {
 	e.Context["worker_id"] = id
 	return e

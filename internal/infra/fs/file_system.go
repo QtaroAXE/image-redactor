@@ -1,8 +1,10 @@
-// internal/service/fs/filesystem.go
+// Package fs - работа с файловой системой: поиск входных файлов, сохранение
+// результатов, перенос файлов в processed/errors после обработки.
 package fs
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,9 @@ import (
 	apperrors "github.com/QtaroAXE/image-redactor/internal/domain/errors"
 )
 
+// FileSystem - обёртка над файловыми операциями приложения.
+// mu защищает операции переноса/записи файлов от гонок при параллельной
+// обработке несколькими воркерами.
 type FileSystem struct {
 	inputDir     string
 	outputDir    string
@@ -19,6 +24,8 @@ type FileSystem struct {
 	mu           sync.RWMutex
 }
 
+// NewFileSystem создаёт файловую систему и гарантирует существование всех
+// нужных директорий (создаёт их при необходимости).
 func NewFileSystem(inputDir, outputDir, processedDir, errorDir string) (*FileSystem, error) {
 	dirs := []string{inputDir, outputDir, processedDir, errorDir}
 
@@ -27,7 +34,7 @@ func NewFileSystem(inputDir, outputDir, processedDir, errorDir string) (*FileSys
 			return nil, apperrors.WrapWithFile(
 				err,
 				apperrors.TypeInternal,
-				fmt.Sprintf("failed to create directory: %s", dir),
+				fmt.Sprintf("не удалось создать директорию: %s", dir),
 			).WithContext("directory", dir)
 		}
 	}
@@ -40,40 +47,37 @@ func NewFileSystem(inputDir, outputDir, processedDir, errorDir string) (*FileSys
 	}, nil
 }
 
-func (fs *FileSystem) GetInputFiles() ([]string, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
+// GetInputFiles возвращает список путей ко всем изображениям во входной директории.
+func (fsys *FileSystem) GetInputFiles() ([]string, error) {
+	fsys.mu.RLock()
+	defer fsys.mu.RUnlock()
 
 	var files []string
 
-	err := filepath.Walk(fs.inputDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(fsys.inputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return apperrors.WrapWithFile(
 				err,
 				apperrors.TypeInternal,
-				"failed to walk directory",
+				"не удалось обойти директорию",
 			).WithContext("path", path)
 		}
-
 		if info.IsDir() {
 			return nil
 		}
-
-		if fs.isImageFile(path) {
+		if fsys.isImageFile(path) {
 			files = append(files, path)
 		}
-
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
-
 	return files, nil
 }
 
-func (fs *FileSystem) isImageFile(path string) bool {
+// isImageFile определяет, похож ли файл на изображение, по расширению.
+func (fsys *FileSystem) isImageFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".webp":
@@ -83,108 +87,114 @@ func (fs *FileSystem) isImageFile(path string) bool {
 	}
 }
 
-func (fs *FileSystem) GetOutputPath(inputPath string, format string) string {
+// GetOutputPath строит путь для результата на основе исходного имени файла
+// и целевого расширения (jpg/png/webp).
+func (fsys *FileSystem) GetOutputPath(inputPath string, extension string) string {
 	fileName := filepath.Base(inputPath)
 	ext := filepath.Ext(fileName)
 	nameWithoutExt := fileName[:len(fileName)-len(ext)]
 
-	return filepath.Join(fs.outputDir, nameWithoutExt+"."+format)
+	return filepath.Join(fsys.outputDir, nameWithoutExt+"."+extension)
 }
 
-func (fs *FileSystem) SaveOutput(data []byte, outputPath string) error {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+// MoveToProcessed переносит успешно обработанный исходный файл в директорию processed.
+func (fsys *FileSystem) MoveToProcessed(path string) error {
+	fsys.mu.Lock()
+	defer fsys.mu.Unlock()
 
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-		return apperrors.WrapWithFile(
-			err,
-			apperrors.TypeInternal,
-			"failed to create output directory",
-		).WithContext("path", outputPath)
-	}
-
-	if err := os.WriteFile(outputPath, data, 0644); err != nil {
+	dest := filepath.Join(fsys.processedDir, filepath.Base(path))
+	if err := moveFile(path, dest); err != nil {
 		return apperrors.WrapWithFile(
 			err,
 			apperrors.TypeIO,
-			"failed to write output file",
-		).WithContext("path", outputPath)
+			"не удалось перенести файл в директорию processed",
+		).WithContext("source", path).WithContext("destination", dest)
 	}
-
 	return nil
 }
 
-func (fs *FileSystem) MoveToProcessed(path string) error {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+// MoveToError переносит файл, который не удалось обработать, в директорию errors.
+func (fsys *FileSystem) MoveToError(path string) error {
+	fsys.mu.Lock()
+	defer fsys.mu.Unlock()
 
-	dest := filepath.Join(fs.processedDir, filepath.Base(path))
-
-	if err := os.Rename(path, dest); err != nil {
+	dest := filepath.Join(fsys.errorDir, filepath.Base(path))
+	if err := moveFile(path, dest); err != nil {
 		return apperrors.WrapWithFile(
 			err,
 			apperrors.TypeIO,
-			"failed to move file to processed directory",
-		).WithContext("source", path).
-			WithContext("destination", dest)
+			"не удалось перенести файл в директорию errors",
+		).WithContext("source", path).WithContext("destination", dest)
 	}
-
 	return nil
 }
 
-func (fs *FileSystem) MoveToError(path string) error {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	dest := filepath.Join(fs.errorDir, filepath.Base(path))
-
-	if err := os.Rename(path, dest); err != nil {
-		return apperrors.WrapWithFile(
-			err,
-			apperrors.TypeIO,
-			"failed to move file to error directory",
-		).WithContext("source", path).
-			WithContext("destination", dest)
+// moveFile переносит файл. Сначала пробует быстрый os.Rename, а если это не
+// получилось (например, source и destination находятся на разных дисках/томах -
+// частый случай в Docker-контейнерах с смонтированными volume) - копирует
+// содержимое и удаляет исходный файл.
+func moveFile(src, dest string) error {
+	if err := os.Rename(src, dest); err == nil {
+		return nil
 	}
 
-	return nil
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	in.Close()
+
+	return os.Remove(src)
 }
 
-func (fs *FileSystem) ReadFile(path string) ([]byte, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
+// ReadFile читает содержимое файла целиком.
+func (fsys *FileSystem) ReadFile(path string) ([]byte, error) {
+	fsys.mu.RLock()
+	defer fsys.mu.RUnlock()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, apperrors.WrapWithFile(
 			err,
 			apperrors.TypeIO,
-			"failed to read file",
+			"не удалось прочитать файл",
 		).WithContext("path", path)
 	}
-
 	return data, nil
 }
 
-func (fs *FileSystem) FileExists(path string) bool {
+// FileExists проверяет, существует ли файл по указанному пути.
+func (fsys *FileSystem) FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
-func (fs *FileSystem) GetFileSize(path string) (int64, error) {
+
+// GetFileSize возвращает размер файла в байтах.
+func (fsys *FileSystem) GetFileSize(path string) (int64, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return 0, apperrors.WrapWithFile(
 			err,
 			apperrors.TypeNotFound,
-			"failed to get file info",
+			"не удалось получить информацию о файле",
 		).WithContext("path", path)
 	}
 	return info.Size(), nil
 }
 
-func (fs *FileSystem) GetInputDir() string {
-	return fs.inputDir
-}
-func (fs *FileSystem) GetOutputDir() string {
-	return fs.outputDir
-}
+func (fsys *FileSystem) GetInputDir() string  { return fsys.inputDir }
+func (fsys *FileSystem) GetOutputDir() string { return fsys.outputDir }

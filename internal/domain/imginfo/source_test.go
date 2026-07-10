@@ -1,8 +1,21 @@
 package imginfo
 
 import (
+	"strings"
 	"testing"
 )
+
+// containsAll проверяет, что сообщение об ошибке содержит все ожидаемые подстроки.
+// Точное совпадение строк не используется намеренно: AppError.Error() включает
+// имя файла и номер строки, которые могут меняться при рефакторинге.
+func containsAll(t *testing.T, got string, parts ...string) {
+	t.Helper()
+	for _, p := range parts {
+		if !strings.Contains(got, p) {
+			t.Errorf("сообщение об ошибке %q не содержит ожидаемую часть %q", got, p)
+		}
+	}
+}
 
 func TestNewSourceImage(t *testing.T) {
 	tests := []struct {
@@ -11,56 +24,56 @@ func TestNewSourceImage(t *testing.T) {
 		format    Format
 		sizeBytes int64
 		wantErr   bool
-		errMsg    string
+		errPart   string
 	}{
 		{
-			name:      "valid source image",
+			name:      "корректное изображение",
 			path:      "/path/to/image.jpg",
 			format:    FormatJPEG,
 			sizeBytes: 1024,
 			wantErr:   false,
 		},
 		{
-			name:      "valid source image with spaces in path",
+			name:      "корректное изображение с пробелами в пути",
 			path:      "  /path/to/image.jpg  ",
 			format:    FormatPNG,
 			sizeBytes: 2048,
 			wantErr:   false,
 		},
 		{
-			name:      "empty path",
+			name:      "пустой путь",
 			path:      "",
 			format:    FormatJPEG,
 			sizeBytes: 1024,
 			wantErr:   true,
-			errMsg:    "image: source path is empty",
+			errPart:   "путь к файлу не может быть пустым",
 		},
 		{
-			name:      "path with only spaces",
+			name:      "путь из одних пробелов",
 			path:      "   ",
 			format:    FormatJPEG,
 			sizeBytes: 1024,
 			wantErr:   true,
-			errMsg:    "image: source path is empty",
+			errPart:   "путь к файлу не может быть пустым",
 		},
 		{
-			name:      "zero format",
+			name:      "пустой формат",
 			path:      "/path/to/image.jpg",
-			format:    Format{""},
+			format:    Format{},
 			sizeBytes: 1024,
 			wantErr:   true,
-			errMsg:    "image: source format is not set",
+			errPart:   "формат изображения не указан",
 		},
 		{
-			name:      "negative size",
+			name:      "отрицательный размер",
 			path:      "/path/to/image.jpg",
 			format:    FormatJPEG,
 			sizeBytes: -100,
 			wantErr:   true,
-			errMsg:    "image: source size must be non-negative, got -100",
+			errPart:   "размер файла не может быть отрицательным",
 		},
 		{
-			name:      "zero size is valid",
+			name:      "нулевой размер - это нормально",
 			path:      "/path/to/image.jpg",
 			format:    FormatPNG,
 			sizeBytes: 0,
@@ -74,29 +87,17 @@ func TestNewSourceImage(t *testing.T) {
 
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("NewSourceImage() expected error but got none")
-					return
+					t.Fatalf("NewSourceImage() ожидалась ошибка, но её нет")
 				}
-				if err.Error() != tt.errMsg {
-					t.Errorf("NewSourceImage() error = %v, want %v", err.Error(), tt.errMsg)
-				}
+				containsAll(t, err.Error(), tt.errPart)
 				return
 			}
 
 			if err != nil {
-				t.Errorf("NewSourceImage() unexpected error: %v", err)
-				return
+				t.Fatalf("NewSourceImage() неожиданная ошибка: %v", err)
 			}
 
-			// Проверяем поля
-			expectedPath := tt.path
-			if tt.path != "" {
-				// Путь должен быть обрезан от пробелов
-				if tt.path == "  /path/to/image.jpg  " {
-					expectedPath = "/path/to/image.jpg"
-				}
-			}
-
+			expectedPath := strings.TrimSpace(tt.path)
 			if got.Path() != expectedPath {
 				t.Errorf("Path() = %v, want %v", got.Path(), expectedPath)
 			}
@@ -106,14 +107,8 @@ func TestNewSourceImage(t *testing.T) {
 			if got.SizeBytes() != tt.sizeBytes {
 				t.Errorf("SizeBytes() = %v, want %v", got.SizeBytes(), tt.sizeBytes)
 			}
-			if got.Width() != 0 {
-				t.Errorf("Width() = %v, want 0", got.Width())
-			}
-			if got.Height() != 0 {
-				t.Errorf("Height() = %v, want 0", got.Height())
-			}
 			if got.HasDimensions() {
-				t.Error("HasDimensions() should be false for new image without dimensions")
+				t.Error("HasDimensions() должен быть false для нового изображения")
 			}
 		})
 	}
@@ -122,7 +117,7 @@ func TestNewSourceImage(t *testing.T) {
 func TestSourceImage_WithDimensions(t *testing.T) {
 	baseImage, err := NewSourceImage("/test/image.jpg", FormatJPEG, 1024)
 	if err != nil {
-		t.Fatalf("Failed to create base image: %v", err)
+		t.Fatalf("не удалось создать базовое изображение: %v", err)
 	}
 
 	tests := []struct {
@@ -130,55 +125,14 @@ func TestSourceImage_WithDimensions(t *testing.T) {
 		width   int
 		height  int
 		wantErr bool
-		errMsg  string
 	}{
-		{
-			name:    "valid dimensions",
-			width:   1920,
-			height:  1080,
-			wantErr: false,
-		},
-		{
-			name:    "valid square dimensions",
-			width:   800,
-			height:  800,
-			wantErr: false,
-		},
-		{
-			name:    "zero width",
-			width:   0,
-			height:  1080,
-			wantErr: true,
-			errMsg:  "image: dimensions must be positive, got 0x1080",
-		},
-		{
-			name:    "zero height",
-			width:   1920,
-			height:  0,
-			wantErr: true,
-			errMsg:  "image: dimensions must be positive, got 1920x0",
-		},
-		{
-			name:    "negative width",
-			width:   -100,
-			height:  1080,
-			wantErr: true,
-			errMsg:  "image: dimensions must be positive, got -100x1080",
-		},
-		{
-			name:    "negative height",
-			width:   1920,
-			height:  -100,
-			wantErr: true,
-			errMsg:  "image: dimensions must be positive, got 1920x-100",
-		},
-		{
-			name:    "both negative",
-			width:   -1920,
-			height:  -1080,
-			wantErr: true,
-			errMsg:  "image: dimensions must be positive, got -1920x-1080",
-		},
+		{"корректные размеры", 1920, 1080, false},
+		{"квадратные размеры", 800, 800, false},
+		{"нулевая ширина", 0, 1080, true},
+		{"нулевая высота", 1920, 0, true},
+		{"отрицательная ширина", -100, 1080, true},
+		{"отрицательная высота", 1920, -100, true},
+		{"оба отрицательные", -1920, -1080, true},
 	}
 
 	for _, tt := range tests {
@@ -187,125 +141,47 @@ func TestSourceImage_WithDimensions(t *testing.T) {
 
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("WithDimensions() expected error but got none")
-					return
+					t.Fatalf("WithDimensions() ожидалась ошибка, но её нет")
 				}
-				if err.Error() != tt.errMsg {
-					t.Errorf("WithDimensions() error = %v, want %v", err.Error(), tt.errMsg)
-				}
+				containsAll(t, err.Error(), "ширина и высота должны быть положительными")
 				return
 			}
 
 			if err != nil {
-				t.Errorf("WithDimensions() unexpected error: %v", err)
-				return
+				t.Fatalf("WithDimensions() неожиданная ошибка: %v", err)
 			}
 
-			// Проверяем, что оригинальное изображение не изменилось
 			if baseImage.Width() != 0 || baseImage.Height() != 0 {
-				t.Error("Original image should not be modified")
+				t.Error("исходное изображение не должно было измениться (иммутабельность)")
 			}
-
-			// Проверяем новое изображение
-			if img.Width() != tt.width {
-				t.Errorf("Width() = %v, want %v", img.Width(), tt.width)
-			}
-			if img.Height() != tt.height {
-				t.Errorf("Height() = %v, want %v", img.Height(), tt.height)
+			if img.Width() != tt.width || img.Height() != tt.height {
+				t.Errorf("Width/Height = %vx%v, want %vx%v", img.Width(), img.Height(), tt.width, tt.height)
 			}
 			if !img.HasDimensions() {
-				t.Error("HasDimensions() should be true for image with dimensions")
-			}
-
-			// Проверяем, что остальные поля сохранились
-			if img.Path() != baseImage.Path() {
-				t.Errorf("Path() = %v, want %v", img.Path(), baseImage.Path())
-			}
-			if img.Format() != baseImage.Format() {
-				t.Errorf("Format() = %v, want %v", img.Format(), baseImage.Format())
-			}
-			if img.SizeBytes() != baseImage.SizeBytes() {
-				t.Errorf("SizeBytes() = %v, want %v", img.SizeBytes(), baseImage.SizeBytes())
+				t.Error("HasDimensions() должен быть true, когда размеры заданы")
 			}
 		})
 	}
 }
 
-func TestSourceImage_HasDimensions(t *testing.T) {
-	img, _ := NewSourceImage("/test.jpg", FormatJPEG, 100)
-
-	if img.HasDimensions() {
-		t.Error("HasDimensions() should return false for image without dimensions")
-	}
-
-	imgWithDim, _ := img.WithDimensions(100, 200)
-	if !imgWithDim.HasDimensions() {
-		t.Error("HasDimensions() should return true for image with dimensions")
-	}
-}
-
-func TestSourceImage_Getters(t *testing.T) {
-	path := "/test/unique/path.jpg"
-	format := FormatPNG
-	size := int64(54321)
-
-	img, err := NewSourceImage(path, format, size)
-	if err != nil {
-		t.Fatalf("Failed to create image: %v", err)
-	}
-
-	if img.Path() != path {
-		t.Errorf("Path() = %v, want %v", img.Path(), path)
-	}
-
-	if img.Format() != format {
-		t.Errorf("Format() = %v, want %v", img.Format(), format)
-	}
-
-	if img.SizeBytes() != size {
-		t.Errorf("SizeBytes() = %v, want %v", img.SizeBytes(), size)
-	}
-
-	if img.Width() != 0 {
-		t.Errorf("Width() = %v, want 0", img.Width())
-	}
-
-	if img.Height() != 0 {
-		t.Errorf("Height() = %v, want 0", img.Height())
-	}
-}
-
 func TestSourceImage_Immutability(t *testing.T) {
-	// Тест проверяет иммутабельность методов WithDimensions
 	original, err := NewSourceImage("/test.jpg", FormatJPEG, 1000)
 	if err != nil {
-		t.Fatalf("Failed to create image: %v", err)
+		t.Fatalf("не удалось создать изображение: %v", err)
 	}
 
 	modified, err := original.WithDimensions(1920, 1080)
 	if err != nil {
-		t.Fatalf("Failed to set dimensions: %v", err)
+		t.Fatalf("не удалось задать размеры: %v", err)
 	}
 
-	// Оригинал не должен измениться
 	if original.Width() != 0 || original.Height() != 0 {
-		t.Error("Original image should not have dimensions")
+		t.Error("оригинал не должен иметь размеров")
 	}
-
-	// Модифицированная копия должна иметь размеры
 	if modified.Width() != 1920 || modified.Height() != 1080 {
-		t.Error("Modified image should have dimensions")
+		t.Error("копия должна иметь заданные размеры")
 	}
-
-	// Другие поля должны совпадать
-	if original.Path() != modified.Path() {
-		t.Error("Path should be the same")
+	if original.Path() != modified.Path() || original.Format() != modified.Format() || original.SizeBytes() != modified.SizeBytes() {
+		t.Error("остальные поля должны совпадать")
 	}
-	if original.Format() != modified.Format() {
-		t.Error("Format should be the same")
-	}
-	if original.SizeBytes() != modified.SizeBytes() {
-		t.Error("SizeBytes should be the same")
-	}
-
 }
