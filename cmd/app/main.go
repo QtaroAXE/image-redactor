@@ -45,15 +45,19 @@ func main() {
 	// в промежуточном состоянии. Для полноценного graceful shutdown нужно
 	// прокидывать общий context.Context вглубь ConsoleUI и WorkerPool -
 	// это осознанно оставлено на будущее ради простоты текущей реализации.
+	// Автоочистку processed (если она включена в конфиге) всё равно успеваем
+	// выполнить, так как она не связана с пулом воркеров.
+	consoleUI := ui.NewConsoleUI(cfg)
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
 		fmt.Println("\nЗавершение работы...")
+		consoleUI.CleanupOnExit()
 		os.Exit(0)
 	}()
 
-	consoleUI := ui.NewConsoleUI(cfg)
 	if err := consoleUI.Run(); err != nil {
 		log.Fatalf("Ошибка интерфейса: %v", err)
 	}

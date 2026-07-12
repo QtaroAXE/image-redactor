@@ -4,5 +4,6 @@
   "processed": "./processed",
   "errors": "./errors",
   "workers": 4,
-  "quality": 85
+  "quality": 85,
+  "processed_ttl_hours": 0
 }

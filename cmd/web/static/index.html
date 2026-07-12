@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Контрольный лист — лаборатория изображений</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ============ ТОКЕНЫ ДИЗАЙНА ============ */
+  :root{
+    --paper: #EAE6DA;        /* фон — цвет бумаги контрольного листа */
+    --paper-dim: #DED9C8;    /* фон панелей чуть темнее */
+    --ink: #1E1B16;          /* основной текст — чёрные чернила */
+    --ink-soft: #5B563F;     /* второстепенный текст */
+    --frame: #A69E88;        /* рамки, перфорация, разделители */
+    --proof-red: #C4281C;    /* акцент — красный грифель проявщика */
+    --proof-red-dark: #8F1912;
+    --fixer-green: #4F6E52;  /* успех / готово */
+    --contact-black: #100E0B;/* самый тёмный — паспарту, зона загрузки */
+    --font-display: 'Bricolage Grotesque', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'Courier New', monospace;
+    --font-body: 'IBM Plex Sans', system-ui, sans-serif;
+    --radius: 3px;
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light; }
+  body{
+    margin:0;
+    background:
+      radial-gradient(ellipse at top left, rgba(196,40,28,0.05), transparent 40%),
+      var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    line-height: 1.5;
+  }
+  /* лёгкое бумажное зерно, статично — не анимируется */
+  body::before{
+    content:"";
+    position: fixed; inset:0; pointer-events:none; z-index: 0;
+    opacity:.05; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  h1,h2,h3{ font-family: var(--font-display); margin:0; letter-spacing: -0.01em; }
+  a { color: inherit; }
+
+  .wrap{ max-width: 1040px; margin: 0 auto; padding: 0 20px 80px; position: relative; z-index:1; }
+
+  /* ============ ВЕРХНЯЯ ПАНЕЛЬ ============ */
+  .topbar{
+    display:flex; justify-content:space-between; align-items:center;
+    padding: 22px 20px; border-bottom: 1px solid var(--frame);
+    font-family: var(--font-mono); font-size: 12px; letter-spacing:.08em; text-transform:uppercase;
+    color: var(--ink-soft);
+  }
+  .topbar strong{ color: var(--ink); }
+
+  /* ============ ПЕРФОРАЦИЯ (сигнатурный элемент) ============ */
+  .sprockets{
+    display:flex; gap:8px; padding: 10px 0;
+  }
+  .sprockets span{
+    width:10px; height:10px; border-radius:2px;
+    background: var(--paper-dim);
+    border:1px solid var(--frame);
+    flex: none;
+  }
+
+  /* ============ FRAME — общая обёртка "кадра" ============ */
+  .frame{
+    margin-top: 34px;
+    border: 1px solid var(--frame);
+    border-radius: var(--radius);
+    background: var(--paper);
+    position: relative;
+  }
+  .frame-label{
+    font-family: var(--font-mono); font-size: 11px; letter-spacing:.1em; text-transform: uppercase;
+    color: var(--ink-soft);
+    display:flex; align-items:center; gap:10px;
+    padding: 14px 20px; border-bottom: 1px solid var(--frame);
+  }
+  .frame-label .dot{
+    width:8px; height:8px; border-radius:50%;
+    border:1.5px solid var(--proof-red);
+  }
+  .frame-label .dot.on{ background: var(--proof-red); }
+  .frame-body{ padding: 28px 24px 30px; }
+
+  /* ============ HERO / FRAME 01 ============ */
+  .hero h1{ font-size: clamp(30px, 4.4vw, 46px); font-weight: 700; }
+  .hero .lede{
+    max-width: 46ch; margin-top:12px; color: var(--ink-soft); font-size:16px;
+  }
+
+  .dropzone{
+    margin-top: 26px;
+    background: var(--contact-black);
+    border-radius: var(--radius);
+    padding: 18px 0;
+    position: relative;
+    cursor: pointer;
+    outline: none;
+  }
+  .dropzone .perf-row{ display:flex; justify-content:space-between; padding: 0 18px; }
+  .dropzone .perf-row span{
+    width: 12px; height: 12px; border-radius: 2px; background: var(--paper); opacity:.85;
+  }
+  .dropzone-inner{
+    margin: 14px 18px; padding: 46px 20px;
+    border: 1.5px dashed rgba(234,230,218,0.35);
+    border-radius: 2px;
+    text-align:center; color: var(--paper);
+    transition: border-color .15s ease, background-color .15s ease;
+  }
+  .dropzone.dragover .dropzone-inner,
+  .dropzone:focus-visible .dropzone-inner{
+    border-color: var(--proof-red);
+    background: rgba(196,40,28,0.08);
+  }
+  .dropzone-inner .cta-line{ font-family: var(--font-mono); font-size:13px; letter-spacing:.06em; text-transform:uppercase; opacity:.75;}
+  .dropzone-inner .cta-main{ font-family: var(--font-display); font-size:20px; margin-top:8px; }
+  .dropzone-inner .cta-main em{ color: var(--proof-red); font-style: normal; }
+  .dropzone input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+
+  .file-chip{
+    display:none; margin-top:14px; align-items:center; gap:10px;
+    font-family: var(--font-mono); font-size: 13px; color: var(--paper);
+  }
+  .file-chip.show{ display:flex; }
+  .file-chip .name{ color: var(--paper); }
+  .file-chip button{
+    background:none; border:1px solid rgba(234,230,218,0.4); color:var(--paper);
+    font-family: var(--font-mono); font-size:11px; padding:4px 8px; border-radius:2px; cursor:pointer;
+  }
+  .file-chip button:hover{ border-color: var(--proof-red); color:var(--proof-red); }
+
+  /* ============ FRAME 02 — НАСТРОЙКИ ============ */
+  #frame-settings{ display:none; }
+  #frame-settings.show{ display:block; }
+
+  .settings-grid{
+    display:grid; grid-template-columns: 1fr 1.15fr; gap: 30px;
+  }
+  @media (max-width: 760px){ .settings-grid{ grid-template-columns: 1fr; } }
+
+  .preview-pane{
+    background: var(--contact-black); border-radius: var(--radius);
+    padding: 14px; position:relative;
+  }
+  .preview-img-wrap{ position:relative; overflow:hidden; border-radius:2px; }
+  .preview-img-wrap img{ display:block; width:100%; height:auto; }
+  .crop-overlay{
+    position:absolute; border: 1.5px solid var(--proof-red);
+    box-shadow: 0 0 0 1000px rgba(16,14,11,0.55);
+    display:none; pointer-events:none;
+  }
+  .crop-overlay.show{ display:block; }
+  .preview-meta{
+    margin-top:10px; font-family: var(--font-mono); font-size:11px; color: var(--paper); opacity:.7;
+  }
+
+  fieldset{ border:none; margin:0 0 24px; padding:0; }
+  legend{
+    font-family: var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color: var(--ink-soft); margin-bottom:10px; padding:0;
+  }
+
+  .chip-row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .chip{
+    font-family: var(--font-mono); font-size:12.5px; letter-spacing:.03em;
+    padding:8px 14px; border:1.5px solid var(--frame); border-radius: 20px;
+    background: transparent; color: var(--ink); cursor:pointer;
+  }
+  .chip:hover{ border-color: var(--ink); }
+  .chip[aria-pressed="true"]{
+    border-color: var(--proof-red); color: var(--proof-red-dark);
+    background: rgba(196,40,28,0.08);
+  }
+  .chip:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible{
+    outline: 2px solid var(--proof-red); outline-offset: 2px;
+  }
+
+  .slider-row{ display:flex; align-items:center; gap:14px; margin-top: 6px; }
+  .slider-row input[type=range]{ flex:1; accent-color: var(--proof-red); }
+  .slider-row .val{
+    font-family: var(--font-mono); font-size:13px; min-width: 46px; text-align:right; color: var(--ink-soft);
+  }
+
+  .radio-row{ display:flex; flex-direction:column; gap:8px; }
+  .radio-opt{ display:flex; align-items:center; gap:8px; font-size:14px; }
+  .radio-opt input{ accent-color: var(--proof-red); }
+
+  .subfields{ margin-top:12px; padding-left:24px; display:none; }
+  .subfields.show{ display:block; }
+  .coord-grid{ display:grid; grid-template-columns: repeat(4,1fr); gap:10px; }
+  .field label{ display:block; font-family: var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color: var(--ink-soft); margin-bottom:4px; }
+  .field input[type=number], .field input[type=text]{
+    width:100%; font-family: var(--font-mono); font-size:13px;
+    padding:8px 10px; border:1px solid var(--frame); border-radius:2px; background: var(--paper-dim); color: var(--ink);
+  }
+
+  .wm-toggle{ display:flex; align-items:center; gap:10px; cursor:pointer; }
+  .switch{
+    width:38px; height:22px; border-radius:12px; background: var(--frame); position:relative; transition: background .15s;
+    flex: none;
+  }
+  .switch::after{
+    content:""; position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%;
+    background: var(--paper); transition: transform .15s;
+  }
+  input#wm-on{ position:absolute; opacity:0; width:0; height:0; }
+  input#wm-on:checked + .wm-toggle-label .switch{ background: var(--proof-red); }
+  input#wm-on:checked + .wm-toggle-label .switch::after{ transform: translateX(16px); }
+
+  #wm-fields{ display:none; margin-top:16px; }
+  #wm-fields.show{ display:block; }
+
+  .pos-grid{ display:grid; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(2, 36px); gap:6px; }
+  .pos-btn{
+    border:1.5px solid var(--frame); background: transparent; border-radius:2px; cursor:pointer; position:relative;
+  }
+  .pos-btn[aria-pressed="true"]{ border-color: var(--proof-red); }
+  .pos-btn[aria-pressed="true"]::after{
+    content:""; position:absolute; inset:6px; border:1.5px solid var(--proof-red); border-radius:50%;
+  }
+  .pos-btn.empty{ visibility:hidden; }
+
+  .submit-row{ display:flex; align-items:center; gap:16px; margin-top: 4px; }
+  .btn-primary{
+    font-family: var(--font-mono); font-size:13px; letter-spacing:.08em; text-transform:uppercase;
+    background: var(--proof-red); color: var(--paper); border:none; padding:14px 24px; border-radius:2px;
+    cursor:pointer;
+  }
+  .btn-primary:hover{ background: var(--proof-red-dark); }
+  .btn-primary:disabled{ background: var(--frame); cursor:not-allowed; }
+  .btn-secondary{
+    font-family: var(--font-mono); font-size:12.5px; letter-spacing:.06em; text-transform:uppercase;
+    background: none; border:1.5px solid var(--frame); color: var(--ink-soft); padding:12px 18px; border-radius:2px; cursor:pointer;
+  }
+  .btn-secondary:hover{ border-color: var(--ink); color: var(--ink); }
+
+  /* ============ FRAME 03 — ПРОЯВКА / РЕЗУЛЬТАТ ============ */
+  #frame-result{ display:none; }
+  #frame-result.show{ display:block; }
+
+  .progress-strip{ display:flex; gap:6px; margin-bottom: 18px; }
+  .progress-strip span{
+    flex:1; height:14px; border-radius:2px; background: var(--paper-dim); border:1px solid var(--frame);
+    transition: background-color .12s ease, border-color .12s ease;
+  }
+  .progress-strip span.filled{ background: var(--proof-red); border-color: var(--proof-red-dark); }
+  .progress-strip.processing span{ animation: pulse 1.1s ease-in-out infinite; }
+  .progress-strip.processing span:nth-child(odd){ animation-delay: .18s; }
+  @media (prefers-reduced-motion: reduce){ .progress-strip.processing span{ animation:none; opacity:.6; } }
+  @keyframes pulse{ 0%,100%{ opacity:.35 } 50%{ opacity:1 } }
+
+  .status-line{ font-family: var(--font-mono); font-size:13px; color: var(--ink-soft); }
+  .status-line.error{ color: var(--proof-red-dark); }
+  .status-line.done{ color: var(--fixer-green); }
+
+  .result-panel{
+    margin-top:20px; display:none; grid-template-columns: 140px 1fr; gap:18px; align-items:center;
+  }
+  .result-panel.show{ display:grid; }
+  .result-thumb{ width:140px; height:140px; object-fit:cover; border-radius:2px; border:1px solid var(--frame); background: var(--contact-black); }
+  .result-stats{ font-family: var(--font-mono); font-size:14px; }
+  .result-stats .reduction{ color: var(--fixer-green); font-weight:600; }
+  .result-actions{ margin-top:14px; display:flex; gap:12px; }
+
+  footer{
+    margin-top: 50px; padding-top:18px; border-top:1px solid var(--frame);
+    font-family: var(--font-mono); font-size:11px; color: var(--ink-soft); letter-spacing:.04em;
+  }
+
+  .sr-only{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+    clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span>КОНТРОЛЬНЫЙ ЛИСТ · ЛАБОРАТОРИЯ ИЗОБРАЖЕНИЙ</span>
+  <span>КАДР № <strong id="frame-counter">01</strong></span>
+</div>
+
+<div class="wrap">
+
+  <div class="sprockets" aria-hidden="true">
+    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+  </div>
+
+  <!-- FRAME 01 — ЗАГРУЗКА -->
+  <section class="frame hero">
+    <div class="frame-body">
+      <h1>Проявите свой кадр.</h1>
+      <p class="lede">Загрузите фото — сожмите в JPG, PNG или WebP, обрежьте по координатам или готовому формату, поставьте водяной знак. Всё за один проход.</p>
+
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Загрузить изображение">
+        <div class="perf-row" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="dropzone-inner">
+          <div class="cta-line">Перетащите файл сюда</div>
+          <div class="cta-main">или <em>выберите изображение</em> вручную</div>
+        </div>
+        <div class="perf-row" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp" aria-describedby="file-chip" />
+        <div class="file-chip" id="file-chip">
+          <span>📎</span><span class="name" id="file-name"></span>
+          <button type="button" id="file-clear">Убрать</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FRAME 02 — НАСТРОЙКИ ПРОЯВКИ -->
+  <section class="frame" id="frame-settings">
+    <div class="frame-label"><span class="dot on"></span> Кадр 02 — настройки проявки</div>
+    <div class="frame-body">
+      <div class="settings-grid">
+
+        <div class="preview-pane">
+          <div class="preview-img-wrap" id="preview-wrap">
+            <img id="preview-img" alt="Предпросмотр загруженного изображения" />
+            <div class="crop-overlay" id="crop-overlay"></div>
+          </div>
+          <div class="preview-meta" id="preview-meta"></div>
+        </div>
+
+        <form id="settings-form">
+
+          <fieldset>
+            <legend>Формат результата</legend>
+            <div class="chip-row" id="format-chips" role="group" aria-label="Формат результата">
+              <button type="button" class="chip" data-format="jpeg" aria-pressed="true">JPG</button>
+              <button type="button" class="chip" data-format="png" aria-pressed="false">PNG</button>
+              <button type="button" class="chip" data-format="webp" aria-pressed="false">WebP</button>
+            </div>
+          </fieldset>
+
+          <fieldset id="quality-field">
+            <legend id="quality-legend">Качество (1–100)</legend>
+            <div class="slider-row">
+              <input type="range" id="quality-slider" min="1" max="100" value="85" />
+              <span class="val" id="quality-val">85</span>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Обрезка</legend>
+            <div class="radio-row" id="crop-radios">
+              <label class="radio-opt"><input type="radio" name="crop-mode" value="none" checked /> Без обрезки</label>
+              <label class="radio-opt"><input type="radio" name="crop-mode" value="manual" /> По координатам</label>
+              <label class="radio-opt"><input type="radio" name="crop-mode" value="preset" /> По готовому формату</label>
+            </div>
+
+            <div class="subfields" id="crop-manual-fields">
+              <div class="coord-grid">
+                <div class="field"><label for="crop-x">X</label><input type="number" id="crop-x" min="0" value="0" /></div>
+                <div class="field"><label for="crop-y">Y</label><input type="number" id="crop-y" min="0" value="0" /></div>
+                <div class="field"><label for="crop-w">Ширина</label><input type="number" id="crop-w" min="1" value="800" /></div>
+                <div class="field"><label for="crop-h">Высота</label><input type="number" id="crop-h" min="1" value="800" /></div>
+              </div>
+            </div>
+
+            <div class="subfields" id="crop-preset-fields">
+              <div class="chip-row" id="preset-chips" role="group" aria-label="Готовый формат обрезки">
+                <button type="button" class="chip" data-preset="square" aria-pressed="true">Квадрат 1:1</button>
+                <button type="button" class="chip" data-preset="portrait" aria-pressed="false">Портрет 4:5</button>
+                <button type="button" class="chip" data-preset="story" aria-pressed="false">Сторис 9:16</button>
+                <button type="button" class="chip" data-preset="widescreen" aria-pressed="false">Широкий 16:9</button>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Водяной знак</legend>
+            <input type="checkbox" id="wm-on" />
+            <label class="wm-toggle-label" for="wm-on" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+              <span class="switch" aria-hidden="true"></span>
+              <span>Добавить текстовый водяной знак</span>
+            </label>
+
+            <div id="wm-fields">
+              <div class="field" style="margin-top:12px;">
+                <label for="wm-text">Текст</label>
+                <input type="text" id="wm-text" placeholder="© Ваше имя" maxlength="40" />
+              </div>
+
+              <div style="margin-top:14px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);margin-bottom:8px;">Расположение</label>
+                <div class="pos-grid" role="group" aria-label="Расположение водяного знака">
+                  <button type="button" class="pos-btn" data-pos="top-left" aria-label="Верхний левый угол" aria-pressed="false"></button>
+                  <span class="pos-btn empty" aria-hidden="true"></span>
+                  <button type="button" class="pos-btn" data-pos="top-right" aria-label="Верхний правый угол" aria-pressed="false"></button>
+                  <button type="button" class="pos-btn" data-pos="bottom-left" aria-label="Нижний левый угол" aria-pressed="false"></button>
+                  <button type="button" class="pos-btn" data-pos="center" aria-label="По центру" aria-pressed="false"></button>
+                  <button type="button" class="pos-btn" data-pos="bottom-right" aria-label="Нижний правый угол" aria-pressed="true"></button>
+                </div>
+              </div>
+
+              <div style="margin-top:14px;">
+                <label for="wm-opacity" style="display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);margin-bottom:6px;">Прозрачность</label>
+                <div class="slider-row">
+                  <input type="range" id="wm-opacity" min="5" max="100" value="50" />
+                  <span class="val" id="wm-opacity-val">50%</span>
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
+          <div class="submit-row">
+            <button type="submit" class="btn-primary" id="submit-btn">Проявить кадр →</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- FRAME 03 — ПРОЯВКА / РЕЗУЛЬТАТ -->
+  <section class="frame" id="frame-result">
+    <div class="frame-label"><span class="dot" id="result-dot"></span> Кадр 03 — проявка</div>
+    <div class="frame-body">
+      <div class="progress-strip" id="progress-strip" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <p class="status-line" id="status-line" role="status" aria-live="polite">Ожидание отправки…</p>
+
+      <div class="result-panel" id="result-panel">
+        <img class="result-thumb" id="result-thumb" alt="Готовое изображение" />
+        <div>
+          <div class="result-stats" id="result-stats"></div>
+          <div class="result-actions">
+            <a class="btn-primary" id="download-link" href="#" download style="text-decoration:none; display:inline-block;">Скачать</a>
+            <button type="button" class="btn-secondary" id="reset-btn">Обработать ещё один</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    ОБРАБОТКА ВЫПОЛНЯЕТСЯ НА СЕРВЕРЕ · РЕЗУЛЬТАТЫ ХРАНЯТСЯ ОГРАНИЧЕННОЕ ВРЕМЯ И УДАЛЯЮТСЯ АВТОМАТИЧЕСКИ
+  </footer>
+</div>
+
+<script>
+/*
+  ===========================================================================
+  Контракт с бэкендом (реализовать на сервере отдельно, см. Go-проект):
+
+  POST /api/convert
+    Content-Type: multipart/form-data
+    Поля:
+      file             - файл изображения
+      format           - "jpeg" | "png" | "webp"
+      quality          - число 1-100 (для jpeg/webp)
+      png_level        - число 1-10 (для png)
+      crop_mode        - "none" | "manual" | "preset"
+      crop_x/y/w/h     - числа (если crop_mode = manual)
+      crop_preset      - "square" | "portrait" | "story" | "widescreen" (если crop_mode = preset)
+      watermark        - "1" если включён, иначе поле отсутствует
+      watermark_text
+      watermark_position   - "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center"
+      watermark_opacity    - число 1-100
+
+  Ответ 200 OK (JSON):
+    {
+      "download_url": "/api/download/<id>",
+      "filename": "photo.jpg",
+      "size_before": 4200000,
+      "size_after": 890000
+    }
+
+  Ответ с ошибкой (JSON, статус 4xx/5xx):
+    { "error": "человекочитаемое сообщение" }
+  ===========================================================================
+*/
+
+(() => {
+  'use strict';
+
+  // ---------- состояние ----------
+  const state = {
+    file: null,
+    naturalW: 0,
+    naturalH: 0,
+    format: 'jpeg',
+    quality: 85,
+    pngLevel: 6,
+    cropMode: 'none',
+    crop: { x: 0, y: 0, w: 800, h: 800 },
+    cropPreset: 'square',
+    watermark: false,
+    wmText: '',
+    wmPosition: 'bottom-right',
+    wmOpacity: 50,
+  };
+
+  const PRESET_RATIOS = {
+    square: [1, 1],
+    portrait: [4, 5],
+    story: [9, 16],
+    widescreen: [16, 9],
+  };
+
+  // ---------- ссылки на элементы ----------
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('file-input');
+  const fileChip = document.getElementById('file-chip');
+  const fileName = document.getElementById('file-name');
+  const fileClear = document.getElementById('file-clear');
+
+  const frameSettings = document.getElementById('frame-settings');
+  const frameResult = document.getElementById('frame-result');
+
+  const previewImg = document.getElementById('preview-img');
+  const previewMeta = document.getElementById('preview-meta');
+  const cropOverlay = document.getElementById('crop-overlay');
+
+  const qualityField = document.getElementById('quality-field');
+  const qualityLegend = document.getElementById('quality-legend');
+  const qualitySlider = document.getElementById('quality-slider');
+  const qualityVal = document.getElementById('quality-val');
+
+  const cropManualFields = document.getElementById('crop-manual-fields');
+  const cropPresetFields = document.getElementById('crop-preset-fields');
+  const cropX = document.getElementById('crop-x');
+  const cropY = document.getElementById('crop-y');
+  const cropW = document.getElementById('crop-w');
+  const cropH = document.getElementById('crop-h');
+
+  const wmOn = document.getElementById('wm-on');
+  const wmFields = document.getElementById('wm-fields');
+  const wmText = document.getElementById('wm-text');
+  const wmOpacity = document.getElementById('wm-opacity');
+  const wmOpacityVal = document.getElementById('wm-opacity-val');
+
+  const settingsForm = document.getElementById('settings-form');
+  const submitBtn = document.getElementById('submit-btn');
+
+  const progressStrip = document.getElementById('progress-strip');
+  const progressCells = [...progressStrip.children];
+  const statusLine = document.getElementById('status-line');
+  const resultDot = document.getElementById('result-dot');
+  const resultPanel = document.getElementById('result-panel');
+  const resultThumb = document.getElementById('result-thumb');
+  const resultStats = document.getElementById('result-stats');
+  const downloadLink = document.getElementById('download-link');
+  const resetBtn = document.getElementById('reset-btn');
+
+  // ---------- загрузка файла ----------
+  function acceptFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+      announce('Это не похоже на изображение. Выберите JPG, PNG или WebP.', true);
+      return;
+    }
+    state.file = file;
+    fileName.textContent = file.name;
+    fileChip.classList.add('show');
+
+    const url = URL.createObjectURL(file);
+    previewImg.src = url;
+    previewImg.onload = () => {
+      state.naturalW = previewImg.naturalWidth;
+      state.naturalH = previewImg.naturalHeight;
+      state.crop.w = Math.min(state.crop.w, state.naturalW) || state.naturalW;
+      state.crop.h = Math.min(state.crop.h, state.naturalH) || state.naturalH;
+      cropW.value = state.crop.w;
+      cropH.value = state.crop.h;
+      previewMeta.textContent = `${state.naturalW}×${state.naturalH} px · ${formatBytes(file.size)}`;
+      updateCropOverlay();
+    };
+
+    frameSettings.classList.add('show');
+    frameResult.classList.remove('show');
+    document.getElementById('frame-counter').textContent = '02';
+    frameSettings.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+  });
+  fileInput.addEventListener('change', () => acceptFile(fileInput.files[0]));
+
+  ['dragenter', 'dragover'].forEach(evt =>
+    dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('dragover'); })
+  );
+  ['dragleave', 'drop'].forEach(evt =>
+    dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); })
+  );
+  dropzone.addEventListener('drop', (e) => {
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) acceptFile(file);
+  });
+
+  fileClear.addEventListener('click', (e) => {
+    e.stopPropagation();
+    resetAll();
+  });
+
+  // ---------- формат / качество ----------
+  document.getElementById('format-chips').addEventListener('click', (e) => {
+    const btn = e.target.closest('.chip[data-format]');
+    if (!btn) return;
+    setPressedGroup('#format-chips .chip', btn);
+    state.format = btn.dataset.format;
+
+    if (state.format === 'png') {
+      qualityLegend.textContent = 'Уровень сжатия PNG (1–10)';
+      qualitySlider.min = 1; qualitySlider.max = 10; qualitySlider.value = state.pngLevel;
+    } else {
+      qualityLegend.textContent = 'Качество (1–100)';
+      qualitySlider.min = 1; qualitySlider.max = 100; qualitySlider.value = state.quality;
+    }
+    qualityVal.textContent = qualitySlider.value;
+  });
+
+  qualitySlider.addEventListener('input', () => {
+    qualityVal.textContent = qualitySlider.value;
+    if (state.format === 'png') state.pngLevel = Number(qualitySlider.value);
+    else state.quality = Number(qualitySlider.value);
+  });
+
+  // ---------- обрезка ----------
+  document.querySelectorAll('input[name="crop-mode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      state.cropMode = radio.value;
+      cropManualFields.classList.toggle('show', state.cropMode === 'manual');
+      cropPresetFields.classList.toggle('show', state.cropMode === 'preset');
+      updateCropOverlay();
+    });
+  });
+
+  [cropX, cropY, cropW, cropH].forEach(input => {
+    input.addEventListener('input', () => {
+      state.crop = {
+        x: Number(cropX.value) || 0,
+        y: Number(cropY.value) || 0,
+        w: Number(cropW.value) || 1,
+        h: Number(cropH.value) || 1,
+      };
+      updateCropOverlay();
+    });
+  });
+
+  document.getElementById('preset-chips').addEventListener('click', (e) => {
+    const btn = e.target.closest('.chip[data-preset]');
+    if (!btn) return;
+    setPressedGroup('#preset-chips .chip', btn);
+    state.cropPreset = btn.dataset.preset;
+    updateCropOverlay();
+  });
+
+  // считает прямоугольник обрезки для пресета так же, как это делает бэкенд
+  // (максимальный прямоугольник нужных пропорций по центру изображения)
+  function presetRect(preset, imgW, imgH) {
+    const [rw, rh] = PRESET_RATIOS[preset];
+    let w = imgW;
+    let h = Math.round((w * rh) / rw);
+    if (h > imgH) { h = imgH; w = Math.round((h * rw) / rh); }
+    const x = Math.round((imgW - w) / 2);
+    const y = Math.round((imgH - h) / 2);
+    return { x, y, w, h };
+  }
+
+  // подгоняет прямоугольник под границы изображения (как ClampTo на сервере)
+  function clampRect(rect, imgW, imgH) {
+    let { x, y, w, h } = rect;
+    x = Math.min(Math.max(x, 0), imgW);
+    y = Math.min(Math.max(y, 0), imgH);
+    w = Math.min(w, imgW - x);
+    h = Math.min(h, imgH - y);
+    return { x, y, w: Math.max(w, 0), h: Math.max(h, 0) };
+  }
+
+  function updateCropOverlay() {
+    if (!state.naturalW || !state.naturalH) return;
+    if (state.cropMode === 'none') { cropOverlay.classList.remove('show'); return; }
+
+    const rectPx = state.cropMode === 'preset'
+      ? presetRect(state.cropPreset, state.naturalW, state.naturalH)
+      : clampRect(state.crop, state.naturalW, state.naturalH);
+
+    cropOverlay.style.left = (rectPx.x / state.naturalW * 100) + '%';
+    cropOverlay.style.top = (rectPx.y / state.naturalH * 100) + '%';
+    cropOverlay.style.width = (rectPx.w / state.naturalW * 100) + '%';
+    cropOverlay.style.height = (rectPx.h / state.naturalH * 100) + '%';
+    cropOverlay.classList.add('show');
+  }
+
+  // ---------- водяной знак ----------
+  wmOn.addEventListener('change', () => {
+    state.watermark = wmOn.checked;
+    wmFields.classList.toggle('show', state.watermark);
+  });
+  wmText.addEventListener('input', () => { state.wmText = wmText.value; });
+  wmOpacity.addEventListener('input', () => {
+    state.wmOpacity = Number(wmOpacity.value);
+    wmOpacityVal.textContent = state.wmOpacity + '%';
+  });
+  document.querySelector('.pos-grid').addEventListener('click', (e) => {
+    const btn = e.target.closest('.pos-btn[data-pos]');
+    if (!btn) return;
+    document.querySelectorAll('.pos-btn[data-pos]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+    btn.setAttribute('aria-pressed', 'true');
+    state.wmPosition = btn.dataset.pos;
+  });
+
+  // ---------- отправка на сервер ----------
+  settingsForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!state.file) return;
+    if (state.watermark && !state.wmText.trim()) {
+      announce('Введите текст водяного знака или выключите его.', true);
+      return;
+    }
+    submitBtn.disabled = true;
+    startProcessing();
+  });
+
+  function buildFormData() {
+    const fd = new FormData();
+    fd.append('file', state.file);
+    fd.append('format', state.format);
+    if (state.format === 'png') fd.append('png_level', state.pngLevel);
+    else fd.append('quality', state.quality);
+
+    fd.append('crop_mode', state.cropMode);
+    if (state.cropMode === 'manual') {
+      fd.append('crop_x', state.crop.x);
+      fd.append('crop_y', state.crop.y);
+      fd.append('crop_w', state.crop.w);
+      fd.append('crop_h', state.crop.h);
+    } else if (state.cropMode === 'preset') {
+      fd.append('crop_preset', state.cropPreset);
+    }
+
+    if (state.watermark) {
+      fd.append('watermark', '1');
+      fd.append('watermark_text', state.wmText.trim());
+      fd.append('watermark_position', state.wmPosition);
+      fd.append('watermark_opacity', state.wmOpacity);
+    }
+    return fd;
+  }
+
+  function startProcessing() {
+    frameResult.classList.add('show');
+    document.getElementById('frame-counter').textContent = '03';
+    resultPanel.classList.remove('show');
+    resultDot.classList.remove('on');
+    setProgress(0);
+    progressStrip.classList.remove('processing');
+    statusLine.className = 'status-line';
+    statusLine.textContent = 'Отправка файла…';
+    frameResult.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/convert');
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (!e.lengthComputable) return;
+      setProgress(Math.round((e.loaded / e.total) * 100));
+    });
+    xhr.upload.addEventListener('load', () => {
+      setProgress(100);
+      progressStrip.classList.add('processing');
+      statusLine.textContent = 'Файл на сервере, обработка…';
+    });
+
+    xhr.addEventListener('load', () => {
+      submitBtn.disabled = false;
+      progressStrip.classList.remove('processing');
+      let data;
+      try { data = JSON.parse(xhr.responseText); } catch { data = null; }
+
+      if (xhr.status >= 200 && xhr.status < 300 && data && data.download_url) {
+        onSuccess(data);
+      } else {
+        const msg = (data && data.error) ? data.error : `Сервер ответил ошибкой (${xhr.status}).`;
+        onError(msg);
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      submitBtn.disabled = false;
+      progressStrip.classList.remove('processing');
+      onError('Не удалось связаться с сервером. Проверьте, что бэкенд POST /api/convert запущен и доступен.');
+    });
+
+    xhr.send(buildFormData());
+  }
+
+  function onSuccess(data) {
+    resultDot.classList.add('on');
+    statusLine.className = 'status-line done';
+    statusLine.textContent = 'Готово. Кадр проявлен.';
+
+    resultThumb.src = data.download_url;
+    downloadLink.href = data.download_url;
+    downloadLink.setAttribute('download', data.filename || 'result');
+
+    const before = data.size_before ?? 0;
+    const after = data.size_after ?? 0;
+    const reduction = before > 0 ? Math.round((1 - after / before) * 100) : 0;
+    resultStats.innerHTML =
+      `ДО: ${formatBytes(before)} → ПОСЛЕ: ${formatBytes(after)}` +
+      (before > 0 ? ` · <span class="reduction">-${reduction}%</span>` : '');
+
+    resultPanel.classList.add('show');
+  }
+
+  function onError(message) {
+    statusLine.className = 'status-line error';
+    statusLine.textContent = message;
+  }
+
+  function setProgress(percent) {
+    const filled = Math.round((percent / 100) * progressCells.length);
+    progressCells.forEach((cell, i) => cell.classList.toggle('filled', i < filled));
+  }
+
+  resetBtn.addEventListener('click', resetAll);
+
+  function resetAll() {
+    state.file = null;
+    fileInput.value = '';
+    fileChip.classList.remove('show');
+    frameSettings.classList.remove('show');
+    frameResult.classList.remove('show');
+    document.getElementById('frame-counter').textContent = '01';
+    settingsForm.reset();
+    cropOverlay.classList.remove('show');
+  }
+
+  // ---------- утилиты ----------
+  function setPressedGroup(selector, activeBtn) {
+    document.querySelectorAll(selector).forEach(b => b.setAttribute('aria-pressed', 'false'));
+    activeBtn.setAttribute('aria-pressed', 'true');
+  }
+  function formatBytes(bytes) {
+    if (!bytes) return '0 Б';
+    const units = ['Б', 'КБ', 'МБ', 'ГБ'];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+  }
+  function prefersReducedMotion() {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+  function announce(message, isError) {
+    statusLine.textContent = message;
+    statusLine.className = 'status-line' + (isError ? ' error' : '');
+  }
+})();
+</script>
+</body>
+</html>

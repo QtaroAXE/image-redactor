@@ -55,6 +55,9 @@ func (ui *ConsoleUI) Run() error {
 		case "4":
 			ui.changeConfig()
 		case "5":
+			ui.cleanProcessed()
+		case "6":
+			ui.CleanupOnExit()
 			fmt.Println("\nДо свидания!")
 			return nil
 		default:
@@ -77,7 +80,8 @@ func (ui *ConsoleUI) printMenu() {
 	fmt.Println("  2. Обработать один файл")
 	fmt.Println("  3. Показать текущие настройки")
 	fmt.Println("  4. Изменить настройки")
-	fmt.Println("  5. Выход")
+	fmt.Println("  5. Очистить директорию processed")
+	fmt.Println("  6. Выход")
 }
 
 // getInput выводит подсказку и считывает строку, введённую пользователем.
@@ -267,6 +271,11 @@ func (ui *ConsoleUI) showConfig() {
 	fmt.Printf("  Директория ошибок: %s\n", ui.cfg.Errors)
 	fmt.Printf("  Количество воркеров: %d\n", ui.cfg.Workers)
 	fmt.Printf("  Качество по умолчанию: %d\n", ui.cfg.Quality)
+	if ui.cfg.ProcessedTTLHours > 0 {
+		fmt.Printf("  Автоочистка processed при выходе: включена, старше %d ч.\n", ui.cfg.ProcessedTTLHours)
+	} else {
+		fmt.Println("  Автоочистка processed при выходе: отключена")
+	}
 }
 
 // changeConfig позволяет изменить и сохранить конфигурацию.
@@ -294,12 +303,80 @@ func (ui *ConsoleUI) changeConfig() {
 		}
 	}
 
+	if v := ui.getInput(fmt.Sprintf("Автоочистка processed при выходе, часов (0 - отключить) [%d]: ", ui.cfg.ProcessedTTLHours)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			ui.cfg.ProcessedTTLHours = n
+		} else {
+			fmt.Println("Некорректное значение, оставляю прежнее.")
+		}
+	}
+
 	if strings.ToLower(ui.getInput("Сохранить настройки в configs/config.json? (y/n): ")) == "y" {
 		if err := config.SaveConfig("configs/config.json", ui.cfg); err != nil {
 			fmt.Printf("Ошибка сохранения: %v\n", err)
 		} else {
 			fmt.Println("Настройки сохранены в configs/config.json")
 		}
+	}
+}
+
+// cleanProcessed - пункт меню для ручной очистки директории processed.
+// Пользователь сам решает: удалить всё или только файлы старше N часов.
+func (ui *ConsoleUI) cleanProcessed() {
+	fmt.Println("\n--- Очистка директории processed ---")
+	fmt.Printf("Директория: %s\n", ui.cfg.Processed)
+
+	fmt.Println("Что удалить?")
+	fmt.Println("  1. Все файлы")
+	fmt.Println("  2. Только файлы старше N часов")
+
+	var maxAge time.Duration
+	switch ui.getInputDefault("Выбор", "1") {
+	case "2":
+		hours := ui.askInt("Старше скольких часов удалять", 24)
+		maxAge = time.Duration(hours) * time.Hour
+	default:
+		maxAge = 0 // 0 означает "удалить всё", см. CleanProcessed
+	}
+
+	fsys, err := fs.NewFileSystem(ui.cfg.Input, ui.cfg.Output, ui.cfg.Processed, ui.cfg.Errors)
+	if err != nil {
+		fmt.Printf("Ошибка создания файловой системы: %v\n", err)
+		return
+	}
+
+	removed, err := fsys.CleanProcessed(maxAge)
+	if err != nil {
+		fmt.Printf("Удалено файлов: %d, но были ошибки: %v\n", removed, err)
+		return
+	}
+	fmt.Printf("Удалено файлов: %d\n", removed)
+}
+
+// CleanupOnExit выполняется автоматически при выходе из приложения -
+// как через пункт меню "Выход", так и по сигналу завершения (Ctrl+C),
+// см. main.go. Если в конфиге задан ProcessedTTLHours (> 0), файлы в
+// processed старше этого срока удаляются молча. Если ProcessedTTLHours == 0
+// (значение по умолчанию) - автоочистка отключена, и функция ничего не
+// делает, чтобы поведение приложения было предсказуемым и не удаляло файлы
+// без явного согласия пользователя в конфиге.
+func (ui *ConsoleUI) CleanupOnExit() {
+	if ui.cfg.ProcessedTTLHours <= 0 {
+		return
+	}
+
+	fsys, err := fs.NewFileSystem(ui.cfg.Input, ui.cfg.Output, ui.cfg.Processed, ui.cfg.Errors)
+	if err != nil {
+		return // при выходе не хотим пугать пользователя ошибками файловой системы
+	}
+
+	maxAge := time.Duration(ui.cfg.ProcessedTTLHours) * time.Hour
+	removed, err := fsys.CleanProcessed(maxAge)
+	if removed > 0 {
+		fmt.Printf("Автоочистка processed: удалено файлов старше %d ч. - %d\n", ui.cfg.ProcessedTTLHours, removed)
+	}
+	if err != nil {
+		fmt.Printf("Автоочистка processed завершилась с ошибками: %v\n", err)
 	}
 }
 

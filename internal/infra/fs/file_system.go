@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	apperrors "github.com/QtaroAXE/image-redactor/internal/domain/errors"
 )
@@ -194,6 +195,69 @@ func (fsys *FileSystem) GetFileSize(path string) (int64, error) {
 		).WithContext("path", path)
 	}
 	return info.Size(), nil
+}
+
+// CleanProcessed удаляет файлы из директории processed.
+// Если maxAge <= 0 - удаляются ВСЕ файлы в директории (полная очистка).
+// Если maxAge > 0 - удаляются только файлы, которые не изменялись дольше maxAge
+// (по времени модификации файла, mtime).
+// Возвращает количество удалённых файлов и первую встреченную ошибку, если она была -
+// при этом функция не останавливается на первой ошибке, а пытается удалить
+// остальные файлы (иначе один "залоченный" файл помешал бы почистить всё остальное).
+func (fsys *FileSystem) CleanProcessed(maxAge time.Duration) (int, error) {
+	fsys.mu.Lock()
+	defer fsys.mu.Unlock()
+
+	entries, err := os.ReadDir(fsys.processedDir)
+	if err != nil {
+		return 0, apperrors.WrapWithFile(
+			err,
+			apperrors.TypeIO,
+			"не удалось прочитать директорию processed",
+		).WithContext("directory", fsys.processedDir)
+	}
+
+	removed := 0
+	var firstErr error
+
+	now := time.Now()
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		path := filepath.Join(fsys.processedDir, entry.Name())
+
+		if maxAge > 0 {
+			info, err := entry.Info()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			if now.Sub(info.ModTime()) < maxAge {
+				continue // файл ещё не устарел - пропускаем
+			}
+		}
+
+		if err := os.Remove(path); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		removed++
+	}
+
+	if firstErr != nil {
+		return removed, apperrors.WrapWithFile(
+			firstErr,
+			apperrors.TypeIO,
+			"не все файлы удалось удалить из директории processed",
+		)
+	}
+	return removed, nil
 }
 
 func (fsys *FileSystem) GetInputDir() string  { return fsys.inputDir }

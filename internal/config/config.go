@@ -17,6 +17,12 @@ type Config struct {
 	Errors    string `json:"errors"`
 	Workers   int    `json:"workers"`
 	Quality   int    `json:"quality"`
+
+	// ProcessedTTLHours - через сколько часов файлы в директории processed
+	// считаются "старыми" и удаляются автоматически при выходе из приложения.
+	// 0 (по умолчанию) - автоочистка отключена, файлы хранятся бессрочно,
+	// пока пользователь не удалит их вручную через меню.
+	ProcessedTTLHours int `json:"processed_ttl_hours"`
 }
 
 // LoadConfig загружает конфиг из JSON-файла. Если файл не найден - это НЕ
@@ -69,6 +75,11 @@ func LoadFromEnv() *Config {
 			cfg.Quality = quality
 		}
 	}
+	if val := os.Getenv("PROCESSED_TTL_HOURS"); val != "" {
+		if ttl, err := strconv.Atoi(val); err == nil {
+			cfg.ProcessedTTLHours = ttl
+		}
+	}
 
 	cfg.setDefaults()
 	return cfg
@@ -112,6 +123,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Quality < 1 || c.Quality > 100 {
 		return fmt.Errorf("качество должно быть от 1 до 100, получено %d", c.Quality)
+	}
+	if c.ProcessedTTLHours < 0 {
+		return fmt.Errorf("processed_ttl_hours не может быть отрицательным, получено %d", c.ProcessedTTLHours)
 	}
 	return nil
 }
