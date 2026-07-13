@@ -182,13 +182,20 @@ func (s *CompressorService) encodePNG(img image.Image, path string, level compre
 //
 // Используется чистая Go-библиотека github.com/eringen/gowebper: она кодирует
 // в формат VP8L (WebP lossless) без cgo и без системных зависимостей вроде
-// libwebp/cwebp - достаточно "go mod tidy". Значение quality (1-100) управляет
-// параметром Options.Quality библиотеки: это не совсем то же самое, что
-// "качество" в классическом lossy JPEG, а управление предварительным
-// квантованием цвета перед lossless-упаковкой (чем меньше quality - тем
-// сильнее огрубление цвета и меньше файл, при 100 - почти без потерь).
-// Итоговый файл в любом случае остаётся корректным WebP, читается браузерами
-// и любым просмотрщиком WebP.
+// libwebp/cwebp - достаточно "go mod tidy".
+//
+// Важно про параметр Quality этой библиотеки (была ошибка раньше): в README
+// библиотеки Quality: 0 - это отдельно задокументированный случай "Lossless
+// (default)". Битстрим VP8L технически всегда lossless, но при Quality
+// 1-100 перед кодированием включается предварительное огрубление цвета
+// (округление битов RGB) - то есть шаг, вносящий потери ДО того, как
+// остальное честно жмётся без потерь. Наш domain-тип compression.Quality
+// не допускает 0 (диапазон 1-100), поэтому раньше мы ВСЕГДА просили у
+// библиотеки это огрубление, даже выставив в UI максимальное качество -
+// настоящий lossless через наш интерфейс получить было нельзя никогда.
+// Теперь верхняя граница нашей шкалы (100) отдельно превращается в
+// Quality: 0 у библиотеки, чтобы "качество 100" в интерфейсе означало
+// настоящий lossless, как пользователь и ожидает.
 func (s *CompressorService) encodeWebP(img image.Image, path string, quality compression.Quality) error {
 	out, err := os.Create(path)
 	if err != nil {
@@ -196,9 +203,14 @@ func (s *CompressorService) encodeWebP(img image.Image, path string, quality com
 	}
 	defer out.Close()
 
+	libraryQuality := quality.Value()
+	if libraryQuality >= 100 {
+		libraryQuality = 0 // 0 у gowebper значит "полностью без потерь"
+	}
+
 	opts := &gowebper.Options{
 		Level:   gowebper.LevelDefault,
-		Quality: quality.Value(),
+		Quality: libraryQuality,
 	}
 	if err := gowebper.Encode(out, img, opts); err != nil {
 		return apperrors.WrapWithFile(err, apperrors.TypeEncode, "не удалось закодировать WebP").WithContext("quality", quality.Value())
@@ -206,14 +218,25 @@ func (s *CompressorService) encodeWebP(img image.Image, path string, quality com
 	return nil
 }
 
-// mapCompressionLevel переводит уровень сжатия 1..10 в шкалу png.CompressionLevel.
+// mapCompressionLevel переводит наш уровень сжатия 1..10 в шкалу
+// png.CompressionLevel из стандартной библиотеки.
+//
+// ВАЖНО: в отличие от zlib/libpng, стандартный кодировщик image/png в Go
+// поддерживает только 4 именованных уровня: DefaultCompression, NoCompression,
+// BestSpeed, BestCompression. Любое другое числовое значение он молча
+// трактует как DefaultCompression (см. levelToZlib в стандартной библиотеке
+// image/png). Раньше здесь была ошибка: значения 2..8 маппились в
+// png.CompressionLevel(1..7), которые не входят в 4 разрешённые константы -
+// в итоге 7 из 10 делений шкалы давали одинаковый результат (DefaultCompression),
+// то есть большая часть слайдера была "мёртвой". Теперь весь диапазон 1..10
+// честно разбит на 3 реальных уровня.
 func mapCompressionLevel(level int) png.CompressionLevel {
 	switch {
-	case level <= 1:
+	case level <= 3:
 		return png.BestSpeed
-	case level >= 9:
+	case level >= 8:
 		return png.BestCompression
-	default:
-		return png.CompressionLevel(level - 1)
+	default: // 4..7
+		return png.DefaultCompression
 	}
 }

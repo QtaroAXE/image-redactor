@@ -3,8 +3,6 @@ package compressor
 import "image"
 
 // ResizeImage изменяет размер изображения простым методом "ближайшего соседа".
-// Метод не такой гладкий, как билинейная интерполяция, зато прост и понятен
-// и не требует сторонних библиотек (golang.org/x/image/draw и т.п.).
 // Если width или height равны 0, соответствующая сторона считается
 // автоматически с сохранением пропорций.
 func ResizeImage(img image.Image, width, height int) image.Image {

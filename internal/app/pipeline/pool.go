@@ -1,12 +1,3 @@
-// Package pipeline - пул воркеров для параллельной обработки изображений.
-//
-// Важное architектурное решение: повтор задачи при временной ошибке (retry)
-// делается синхронно внутри той же горутины-воркера простым циклом с паузой,
-// а НЕ через повторную отправку задачи обратно в канал jobQueue. Это сделано
-// специально, чтобы исключить дедлок: если бы воркер сам себе отправлял
-// задачу назад в канал, а канал оказался бы заполнен (например, все воркеры
-// одновременно ушли в повтор) - никто не смог бы читать из канала, и все
-// воркеры зависли бы навсегда. Синхронный retry этого риска не несёт.
 package pipeline
 
 import (
@@ -64,11 +55,11 @@ type WorkerPool struct {
 
 // Job - задача на обработку одного изображения.
 type Job struct {
-	ID         string
-	Source     imginfo.SourceImage
-	Target     imginfo.TargetImage
-	Options    compressor.ProcessingOptions
-	CreatedAt  time.Time
+	ID        string
+	Source    imginfo.SourceImage
+	Target    imginfo.TargetImage
+	Options   compressor.ProcessingOptions
+	CreatedAt time.Time
 }
 
 // Result - результат обработки одной задачи.

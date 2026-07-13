@@ -9,6 +9,7 @@
 package main
 
 import (
+	"archive/zip"
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
@@ -17,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,6 +32,11 @@ import (
 	compressor "github.com/QtaroAXE/image-redactor/internal/infra/codec"
 	"github.com/QtaroAXE/image-redactor/internal/infra/fs"
 )
+
+// maxBatchFiles - сколько файлов можно отправить за один пакетный запрос
+// POST /api/convert-batch. Ограничение защищает сервер от чрезмерно долгих
+// запросов и избыточного расхода памяти/диска за один раз.
+const maxBatchFiles = 30
 
 //go:embed static/index.html
 var staticFiles embed.FS
@@ -68,6 +75,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", server.handleIndex)
 	mux.HandleFunc("POST /api/convert", server.handleConvert)
+	mux.HandleFunc("POST /api/convert-batch", server.handleConvertBatch)
 	mux.HandleFunc("GET /api/download/{name}", server.handleDownload)
 
 	log.Printf("Сайт запущен: http://localhost%s (или ваш адрес, если задан другой --addr)", *addr)
@@ -215,9 +223,22 @@ func (s *webServer) handleConvert(w http.ResponseWriter, r *http.Request) {
 // buildTarget разбирает поля формы, отвечающие за формат и качество, и
 // собирает imginfo.TargetImage с путём в директории результатов.
 func (s *webServer) buildTarget(r *http.Request, reqID string) (imginfo.TargetImage, error) {
-	targetFormat, err := imginfo.NewFormat(r.FormValue("format"))
+	targetFormat, quality, pngLevel, err := parseTargetSettings(r)
 	if err != nil {
 		return imginfo.TargetImage{}, err
+	}
+	resultPath := filepath.Join(s.resultsDir, reqID+"."+targetFormat.Extension())
+	return imginfo.NewTargetImage(resultPath, quality, pngLevel, targetFormat)
+}
+
+// parseTargetSettings разбирает поля format/quality/png_level из формы.
+// Вынесена отдельно от buildTarget, потому что при пакетной обработке
+// (см. handleConvertBatch) эти настройки общие для всех файлов и разбираются
+// один раз, а путь результата у каждого файла свой.
+func parseTargetSettings(r *http.Request) (imginfo.Format, compression.Quality, compression.CompressionLevel, error) {
+	targetFormat, err := imginfo.NewFormat(r.FormValue("format"))
+	if err != nil {
+		return imginfo.Format{}, compression.Quality{}, compression.CompressionLevel{}, err
 	}
 
 	quality := compression.DefaultQuality
@@ -227,28 +248,27 @@ func (s *webServer) buildTarget(r *http.Request, reqID string) (imginfo.TargetIm
 		if v := r.FormValue("png_level"); v != "" {
 			n, convErr := strconv.Atoi(v)
 			if convErr != nil {
-				return imginfo.TargetImage{}, apperrors.New(apperrors.TypeInvalidInput, "png_level должен быть числом")
+				return imginfo.Format{}, compression.Quality{}, compression.CompressionLevel{}, apperrors.New(apperrors.TypeInvalidInput, "png_level должен быть числом")
 			}
 			pngLevel, err = compression.NewCompressionLevel(n)
 			if err != nil {
-				return imginfo.TargetImage{}, err
+				return imginfo.Format{}, compression.Quality{}, compression.CompressionLevel{}, err
 			}
 		}
 	} else {
 		if v := r.FormValue("quality"); v != "" {
 			n, convErr := strconv.Atoi(v)
 			if convErr != nil {
-				return imginfo.TargetImage{}, apperrors.New(apperrors.TypeInvalidInput, "quality должен быть числом")
+				return imginfo.Format{}, compression.Quality{}, compression.CompressionLevel{}, apperrors.New(apperrors.TypeInvalidInput, "quality должен быть числом")
 			}
 			quality, err = compression.NewQuality(n)
 			if err != nil {
-				return imginfo.TargetImage{}, err
+				return imginfo.Format{}, compression.Quality{}, compression.CompressionLevel{}, err
 			}
 		}
 	}
 
-	resultPath := filepath.Join(s.resultsDir, reqID+"."+targetFormat.Extension())
-	return imginfo.NewTargetImage(resultPath, quality, pngLevel, targetFormat)
+	return targetFormat, quality, pngLevel, nil
 }
 
 // buildProcessingOptions разбирает поля формы, отвечающие за обрезку и водяной знак.
@@ -303,7 +323,197 @@ func (s *webServer) buildProcessingOptions(r *http.Request) (compressor.Processi
 	return opts, nil
 }
 
-// handleDownload отдаёt готовый файл по его имени. Имя файла всегда
+// batchItemResult - результат обработки одного файла внутри пакетного запроса.
+type batchItemResult struct {
+	Filename    string `json:"filename"`
+	DownloadURL string `json:"download_url,omitempty"`
+	SizeBefore  int64  `json:"size_before"`
+	SizeAfter   int64  `json:"size_after"`
+	Error       string `json:"error,omitempty"`
+}
+
+// handleConvertBatch - эндпоинт для обработки массива фотографий одним запросом.
+// Все файлы обрабатываются С ОДИНАКОВЫМИ настройками (формат, качество,
+// обрезка, водяной знак) - как и при пакетной обработке в консольной версии
+// (см. processAll в internal/infra/ui/ui.go). Один неудачный файл не обрывает
+// всю партию: он попадает в результаты с полем "error", а остальные файлы
+// обрабатываются как обычно - тот же принцип, что и в WorkerPool.processJob.
+//
+// Контракт запроса/ответа описан в комментарии внутри cmd/web/static/index.html.
+func (s *webServer) handleConvertBatch(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, int64(s.maxUploadMB)<<20*maxBatchFiles)
+
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("файлы слишком большие (лимит %d МБ на файл) или запрос повреждён", s.maxUploadMB))
+		return
+	}
+
+	headers := r.MultipartForm.File["files"]
+	if len(headers) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "поле files обязательно: добавьте хотя бы один файл")
+		return
+	}
+	if len(headers) > maxBatchFiles {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("за один раз можно обработать не более %d файлов", maxBatchFiles))
+		return
+	}
+
+	// Настройки формата/качества/обрезки/водяного знака общие для всей партии,
+	// поэтому разбираем их один раз, а не на каждый файл.
+	targetFormat, quality, pngLevel, err := parseTargetSettings(r)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	opts, err := s.buildProcessingOptions(r)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	comp := compressor.NewCompressorService(s.uploadsFsys)
+
+	results := make([]batchItemResult, 0, len(headers))
+	var successPaths []string
+
+	for _, header := range headers {
+		res := batchItemResult{Filename: header.Filename}
+
+		resultPath, sizeBefore, sizeAfter, procErr := s.processOneFile(comp, header, targetFormat, quality, pngLevel, opts)
+		if procErr != nil {
+			res.Error = procErr.Error()
+			results = append(results, res)
+			continue
+		}
+
+		res.SizeBefore = sizeBefore
+		res.SizeAfter = sizeAfter
+		res.DownloadURL = "/api/download/" + filepath.Base(resultPath)
+		successPaths = append(successPaths, resultPath)
+		results = append(results, res)
+	}
+
+	response := map[string]any{"results": results}
+
+	// Если хотя бы один файл обработан успешно - собираем общий zip-архив,
+	// чтобы не заставлять пользователя скачивать десятки файлов по одному.
+	if len(successPaths) > 0 {
+		if archiveName, archErr := s.buildZipArchive(successPaths); archErr == nil {
+			response["archive_url"] = "/api/download/" + archiveName
+		} else {
+			log.Printf("Не удалось собрать zip-архив результатов: %v", archErr)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+// processOneFile обрабатывает один файл в рамках пакетного запроса: сохраняет
+// загруженный файл во временную директорию, прогоняет через CompressorService
+// с уже разобранными общими настройками и возвращает путь к результату и
+// размеры до/после. Временный исходный файл всегда удаляется перед выходом.
+func (s *webServer) processOneFile(
+	comp *compressor.CompressorService,
+	header *multipart.FileHeader,
+	targetFormat imginfo.Format,
+	quality compression.Quality,
+	pngLevel compression.CompressionLevel,
+	opts compressor.ProcessingOptions,
+) (resultPath string, sizeBefore int64, sizeAfter int64, err error) {
+	file, openErr := header.Open()
+	if openErr != nil {
+		return "", 0, 0, apperrors.New(apperrors.TypeIO, "не удалось открыть файл")
+	}
+	defer file.Close()
+
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(header.Filename)), ".")
+	srcFormat, formatErr := imginfo.NewFormat(ext)
+	if formatErr != nil {
+		return "", 0, 0, formatErr
+	}
+
+	reqID, idErr := newRequestID()
+	if idErr != nil {
+		return "", 0, 0, apperrors.New(apperrors.TypeInternal, "не удалось создать идентификатор")
+	}
+
+	uploadPath := filepath.Join(s.uploadsDir, reqID+"."+ext)
+	if saveErr := saveUploadedFile(file, uploadPath); saveErr != nil {
+		return "", 0, 0, apperrors.New(apperrors.TypeIO, "не удалось сохранить загруженный файл")
+	}
+	defer os.Remove(uploadPath)
+
+	size, sizeErr := s.uploadsFsys.GetFileSize(uploadPath)
+	if sizeErr != nil {
+		return "", 0, 0, apperrors.New(apperrors.TypeIO, "не удалось получить размер файла")
+	}
+
+	src, srcErr := imginfo.NewSourceImage(uploadPath, srcFormat, size)
+	if srcErr != nil {
+		return "", 0, 0, srcErr
+	}
+
+	outPath := filepath.Join(s.resultsDir, reqID+"."+targetFormat.Extension())
+	target, targetErr := imginfo.NewTargetImage(outPath, quality, pngLevel, targetFormat)
+	if targetErr != nil {
+		return "", 0, 0, targetErr
+	}
+
+	if compErr := comp.CompressImage(src, target, opts); compErr != nil {
+		return "", 0, 0, compErr
+	}
+
+	after, _ := s.uploadsFsys.GetFileSize(target.Path())
+	return target.Path(), size, after, nil
+}
+
+// buildZipArchive упаковывает готовые файлы результатов в один zip-архив
+// в resultsDir и возвращает его имя (для ссылки скачивания).
+func (s *webServer) buildZipArchive(paths []string) (string, error) {
+	id, err := newRequestID()
+	if err != nil {
+		return "", err
+	}
+	archivePath := filepath.Join(s.resultsDir, id+".zip")
+
+	out, err := os.Create(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	zw := zip.NewWriter(out)
+	for _, p := range paths {
+		if err := addFileToZip(zw, p); err != nil {
+			zw.Close()
+			os.Remove(archivePath)
+			return "", err
+		}
+	}
+	if err := zw.Close(); err != nil {
+		os.Remove(archivePath)
+		return "", err
+	}
+	return filepath.Base(archivePath), nil
+}
+
+// addFileToZip копирует один файл с диска в открытый zip-архив.
+func addFileToZip(zw *zip.Writer, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	entry, err := zw.Create(filepath.Base(path))
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(entry, f)
+	return err
+}
+
+// handleDownload отдаёт готовый файл по его имени. Имя файла всегда
 // сгенерировано сервером (см. newRequestID), поэтому filepath.Base
 // достаточно, чтобы исключить выход за пределы resultsDir через "../".
 func (s *webServer) handleDownload(w http.ResponseWriter, r *http.Request) {
@@ -378,6 +588,8 @@ func mimeForExt(ext string) string {
 		return "image/png"
 	case ".webp":
 		return "image/webp"
+	case ".zip":
+		return "application/zip"
 	default:
 		return "application/octet-stream"
 	}

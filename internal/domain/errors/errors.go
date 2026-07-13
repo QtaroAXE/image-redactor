@@ -1,8 +1,3 @@
-// Package errors содержит собственный тип ошибки приложения (AppError),
-// который добавляет к обычной ошибке тип, контекст и место возникновения.
-// Названа "errors", а не "apperrors", исторически; во всех остальных файлах
-// пакет импортируется под псевдонимом apperrors, чтобы не путать со
-// стандартным пакетом "errors".
 package errors
 
 import (
@@ -12,25 +7,22 @@ import (
 	"time"
 )
 
-// AppError - структурированная ошибка приложения.
 type AppError struct {
-	Time time.Time `json:"time"` // когда произошла ошибка
+	Time time.Time `json:"time"` //когда произошла ошибка
 
-	Type string `json:"type"` // категория ошибки (см. константы Type* ниже)
+	Type string `json:"type"` //категория ошибки
 
-	Message string `json:"message"` // человекочитаемое описание
+	Message string `json:"message"` //описание
 
 	Err error `json:"-"` // исходная ошибка, если есть (для Unwrap)
 
 	Context map[string]interface{} `json:"context,omitempty"` // дополнительные данные
 
-	File     string `json:"file,omitempty"`     // файл, где создана ошибка
-	Line     int    `json:"line,omitempty"`     // строка
-	Function string `json:"function,omitempty"` // функция
+	File     string `json:"file,omitempty"`     //файл, где создана ошибка
+	Line     int    `json:"line,omitempty"`     //строка
+	Function string `json:"function,omitempty"` //функция
 }
 
-// Категории ошибок. Используются, например, чтобы решить,
-// стоит ли повторить операцию (см. isRetryableError в pipeline).
 const (
 	TypeInvalidInput  = "INVALID_INPUT"
 	TypeNotFound      = "NOT_FOUND"
@@ -59,7 +51,7 @@ func New(errType, message string) *AppError {
 	return err
 }
 
-// NewWithFile - то же самое, что New (оставлено для обратной совместимости вызовов).
+// NewWithFile - то же самое, что New
 func NewWithFile(errType, message string) *AppError {
 	return New(errType, message)
 }
@@ -81,7 +73,7 @@ func Wrap(err error, errType, message string) *AppError {
 	return appErr
 }
 
-// WrapWithFile - то же самое, что Wrap (оставлено для обратной совместимости вызовов).
+// WrapWithFile - то же самое, что Wrap
 func WrapWithFile(err error, errType, message string) *AppError {
 	return Wrap(err, errType, message)
 }

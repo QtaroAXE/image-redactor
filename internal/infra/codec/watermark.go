@@ -10,7 +10,6 @@ import (
 )
 
 // pixelScale - во сколько раз увеличивается один "пиксель" шрифта.
-// Чем больше значение, тем крупнее текст водяного знака.
 const pixelScale = 4
 
 // letterSpacing - расстояние между буквами в пикселях шрифта (до масштабирования).
@@ -20,7 +19,7 @@ const letterSpacing = 1
 const watermarkMargin = 20
 
 // renderWatermarkText рисует текст водяного знака на прозрачном холсте
-// и возвращает готовую картинку (RGBA с альфа-каналом).
+// и возвращает готовую картинку
 func renderWatermarkText(text string, opacity float64) *image.RGBA {
 	text = strings.ToUpper(text)
 	runes := []rune(text)

@@ -1,4 +1,3 @@
-// Package config - загрузка и сохранение настроек приложения.
 package config
 
 import (

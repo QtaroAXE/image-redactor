@@ -153,6 +153,18 @@
   }
   .preview-img-wrap{ position:relative; overflow:hidden; border-radius:2px; }
   .preview-img-wrap img{ display:block; width:100%; height:auto; }
+  .preview-img-wrap.hidden{ display:none; }
+  .batch-grid{
+    display:none; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap:6px;
+  }
+  .batch-grid.show{ display:grid; }
+  .batch-grid img{
+    width:100%; aspect-ratio:1; object-fit:cover; border-radius:2px; border:1px solid var(--frame);
+  }
+  .batch-note{
+    display:none; font-family: var(--font-mono); font-size:11.5px; color: var(--paper); opacity:.75; margin:10px 0 0;
+  }
+  .batch-note.show{ display:block; }
   .crop-overlay{
     position:absolute; border: 1.5px solid var(--proof-red);
     box-shadow: 0 0 0 1000px rgba(16,14,11,0.55);
@@ -271,6 +283,30 @@
   .result-stats .reduction{ color: var(--fixer-green); font-weight:600; }
   .result-actions{ margin-top:14px; display:flex; gap:12px; }
 
+  .batch-result-panel{ display:none; margin-top:20px; }
+  .batch-result-panel.show{ display:block; }
+  .batch-result-actions{ display:flex; gap:12px; margin-bottom:16px; }
+  .batch-result-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+  .batch-result-row{
+    display:flex; align-items:center; gap:12px; padding:10px 12px;
+    border:1px solid var(--frame); border-radius:2px; background: var(--paper-dim);
+    font-family: var(--font-mono); font-size:12.5px;
+  }
+  .batch-result-row.error{ border-color: var(--proof-red); background: rgba(196,40,28,0.06); }
+  .batch-result-row .thumb{
+    width:38px; height:38px; object-fit:cover; border-radius:2px; border:1px solid var(--frame); flex:none;
+    background: var(--contact-black);
+  }
+  .batch-result-row .name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color: var(--ink); }
+  .batch-result-row .stat{ color: var(--ink-soft); white-space:nowrap; }
+  .batch-result-row .stat .reduction{ color: var(--fixer-green); font-weight:600; }
+  .batch-result-row .error-msg{ color: var(--proof-red-dark); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .batch-result-row a{
+    font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color: var(--proof-red-dark);
+    text-decoration:none; border:1px solid var(--proof-red-dark); border-radius:2px; padding:5px 10px; flex:none;
+  }
+  .batch-result-row a:hover{ background: var(--proof-red-dark); color: var(--paper); }
+
   footer{
     margin-top: 50px; padding-top:18px; border-top:1px solid var(--frame);
     font-family: var(--font-mono); font-size:11px; color: var(--ink-soft); letter-spacing:.04em;
@@ -307,13 +343,13 @@
           <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
         </div>
         <div class="dropzone-inner">
-          <div class="cta-line">Перетащите файл сюда</div>
-          <div class="cta-main">или <em>выберите изображение</em> вручную</div>
+          <div class="cta-line">Перетащите один или несколько файлов сюда</div>
+          <div class="cta-main">или <em>выберите изображения</em> вручную</div>
         </div>
         <div class="perf-row" aria-hidden="true">
           <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
         </div>
-        <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp" aria-describedby="file-chip" />
+        <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp" multiple aria-describedby="file-chip" />
         <div class="file-chip" id="file-chip">
           <span>📎</span><span class="name" id="file-name"></span>
           <button type="button" id="file-clear">Убрать</button>
@@ -333,6 +369,8 @@
             <img id="preview-img" alt="Предпросмотр загруженного изображения" />
             <div class="crop-overlay" id="crop-overlay"></div>
           </div>
+          <div class="batch-grid" id="batch-grid" aria-label="Выбранные изображения"></div>
+          <p class="batch-note" id="batch-note"></p>
           <div class="preview-meta" id="preview-meta"></div>
         </div>
 
@@ -446,6 +484,14 @@
           </div>
         </div>
       </div>
+
+      <div class="batch-result-panel" id="batch-result-panel">
+        <div class="batch-result-actions">
+          <a class="btn-primary" id="archive-download-link" href="#" download style="text-decoration:none; display:inline-block;">Скачать всё (zip)</a>
+          <button type="button" class="btn-secondary" id="batch-reset-btn">Обработать ещё раз</button>
+        </div>
+        <ul class="batch-result-list" id="batch-result-list"></ul>
+      </div>
     </div>
   </section>
 
@@ -457,9 +503,9 @@
 <script>
 /*
   ===========================================================================
-  Контракт с бэкендом (реализовать на сервере отдельно, см. Go-проект):
+  Контракт с бэкендом (реализован в cmd/web/main.go):
 
-  POST /api/convert
+  POST /api/convert  - один файл
     Content-Type: multipart/form-data
     Поля:
       file             - файл изображения
@@ -482,7 +528,21 @@
       "size_after": 890000
     }
 
-  Ответ с ошибкой (JSON, статус 4xx/5xx):
+  POST /api/convert-batch  - массив файлов, настройки те же поля, что выше,
+    только файл передаётся полем "files" (повторяется по одному разу на файл),
+    а не "file". Настройки формата/обрезки/водяного знака общие для всех
+    файлов партии.
+
+  Ответ 200 OK (JSON):
+    {
+      "results": [
+        { "filename": "a.jpg", "download_url": "/api/download/..", "size_before":.., "size_after":.. },
+        { "filename": "b.png", "error": "сообщение об ошибке" }
+      ],
+      "archive_url": "/api/download/batch.zip"   // есть, если хотя бы один файл обработан успешно
+    }
+
+  Ответ с ошибкой (JSON, статус 4xx/5xx) - для обоих эндпоинтов:
     { "error": "человекочитаемое сообщение" }
   ===========================================================================
 */
@@ -491,8 +551,10 @@
   'use strict';
 
   // ---------- состояние ----------
+  const MAX_BATCH_FILES = 30; // должно совпадать с maxBatchFiles на сервере (cmd/web/main.go)
+
   const state = {
-    file: null,
+    files: [],
     naturalW: 0,
     naturalH: 0,
     format: 'jpeg',
@@ -506,6 +568,10 @@
     wmPosition: 'bottom-right',
     wmOpacity: 50,
   };
+
+  // созданные object URL нужно освобождать вручную, иначе они копятся в памяти
+  // страницы при повторных выборах файлов
+  let objectURLs = [];
 
   const PRESET_RATIOS = {
     square: [1, 1],
@@ -525,8 +591,11 @@
   const frameResult = document.getElementById('frame-result');
 
   const previewImg = document.getElementById('preview-img');
+  const previewWrap = document.getElementById('preview-wrap');
   const previewMeta = document.getElementById('preview-meta');
   const cropOverlay = document.getElementById('crop-overlay');
+  const batchGrid = document.getElementById('batch-grid');
+  const batchNote = document.getElementById('batch-note');
 
   const qualityField = document.getElementById('quality-field');
   const qualityLegend = document.getElementById('quality-legend');
@@ -559,28 +628,34 @@
   const downloadLink = document.getElementById('download-link');
   const resetBtn = document.getElementById('reset-btn');
 
-  // ---------- загрузка файла ----------
-  function acceptFile(file) {
-    if (!file || !file.type.startsWith('image/')) {
-      announce('Это не похоже на изображение. Выберите JPG, PNG или WebP.', true);
+  const batchResultPanel = document.getElementById('batch-result-panel');
+  const batchResultList = document.getElementById('batch-result-list');
+  const archiveDownloadLink = document.getElementById('archive-download-link');
+  const batchResetBtn = document.getElementById('batch-reset-btn');
+
+  // ---------- загрузка файлов ----------
+  function acceptFiles(fileList) {
+    const incoming = [...fileList].filter(f => f.type.startsWith('image/'));
+    if (incoming.length === 0) {
+      announce('Это не похоже на изображения. Выберите JPG, PNG или WebP.', true);
       return;
     }
-    state.file = file;
-    fileName.textContent = file.name;
+    if (incoming.length > MAX_BATCH_FILES) {
+      announce(`За один раз можно обработать не более ${MAX_BATCH_FILES} файлов. Выбрано: ${incoming.length}.`, true);
+      return;
+    }
+
+    revokeObjectURLs();
+    state.files = incoming;
+
+    if (state.files.length === 1) {
+      fileName.textContent = state.files[0].name;
+    } else {
+      fileName.textContent = `${state.files.length} файлов выбрано`;
+    }
     fileChip.classList.add('show');
 
-    const url = URL.createObjectURL(file);
-    previewImg.src = url;
-    previewImg.onload = () => {
-      state.naturalW = previewImg.naturalWidth;
-      state.naturalH = previewImg.naturalHeight;
-      state.crop.w = Math.min(state.crop.w, state.naturalW) || state.naturalW;
-      state.crop.h = Math.min(state.crop.h, state.naturalH) || state.naturalH;
-      cropW.value = state.crop.w;
-      cropH.value = state.crop.h;
-      previewMeta.textContent = `${state.naturalW}×${state.naturalH} px · ${formatBytes(file.size)}`;
-      updateCropOverlay();
-    };
+    renderPreview();
 
     frameSettings.classList.add('show');
     frameResult.classList.remove('show');
@@ -588,11 +663,63 @@
     frameSettings.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
   }
 
+  // renderPreview показывает либо богатый предпросмотр с рамкой обрезки
+  // (когда выбран один файл), либо сетку миниатюр (когда выбрано несколько) -
+  // рамку обрезки для разных по размеру фото осмысленно нарисовать нельзя,
+  // но сама обрезка на сервере всё равно применится к каждому файлу.
+  function renderPreview() {
+    if (state.files.length === 1) {
+      previewWrap.classList.remove('hidden');
+      batchGrid.classList.remove('show');
+      batchNote.classList.remove('show');
+
+      const file = state.files[0];
+      const url = URL.createObjectURL(file);
+      objectURLs.push(url);
+      previewImg.src = url;
+      previewImg.onload = () => {
+        state.naturalW = previewImg.naturalWidth;
+        state.naturalH = previewImg.naturalHeight;
+        state.crop.w = Math.min(state.crop.w, state.naturalW) || state.naturalW;
+        state.crop.h = Math.min(state.crop.h, state.naturalH) || state.naturalH;
+        cropW.value = state.crop.w;
+        cropH.value = state.crop.h;
+        previewMeta.textContent = `${state.naturalW}×${state.naturalH} px · ${formatBytes(file.size)}`;
+        updateCropOverlay();
+      };
+      return;
+    }
+
+    previewWrap.classList.add('hidden');
+    cropOverlay.classList.remove('show');
+    batchGrid.classList.add('show');
+    batchNote.classList.add('show');
+    batchNote.textContent = 'Настройки применятся одинаково ко всем файлам. Живой предпросмотр обрезки доступен только для одного файла.';
+
+    batchGrid.innerHTML = '';
+    let totalSize = 0;
+    state.files.forEach(file => {
+      totalSize += file.size;
+      const url = URL.createObjectURL(file);
+      objectURLs.push(url);
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = file.name;
+      batchGrid.appendChild(img);
+    });
+    previewMeta.textContent = `${state.files.length} файлов · ${formatBytes(totalSize)} суммарно`;
+  }
+
+  function revokeObjectURLs() {
+    objectURLs.forEach(url => URL.revokeObjectURL(url));
+    objectURLs = [];
+  }
+
   dropzone.addEventListener('click', () => fileInput.click());
   dropzone.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
   });
-  fileInput.addEventListener('change', () => acceptFile(fileInput.files[0]));
+  fileInput.addEventListener('change', () => acceptFiles(fileInput.files));
 
   ['dragenter', 'dragover'].forEach(evt =>
     dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('dragover'); })
@@ -601,8 +728,7 @@
     dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); })
   );
   dropzone.addEventListener('drop', (e) => {
-    const file = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (file) acceptFile(file);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) acceptFiles(e.dataTransfer.files);
   });
 
   fileClear.addEventListener('click', (e) => {
@@ -721,7 +847,7 @@
   // ---------- отправка на сервер ----------
   settingsForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    if (!state.file) return;
+    if (state.files.length === 0) return;
     if (state.watermark && !state.wmText.trim()) {
       announce('Введите текст водяного знака или выключите его.', true);
       return;
@@ -730,9 +856,9 @@
     startProcessing();
   });
 
-  function buildFormData() {
-    const fd = new FormData();
-    fd.append('file', state.file);
+  // buildSharedFields добавляет общие для одиночной и пакетной отправки поля
+  // (формат, качество, обрезка, водяной знак) - файл(ы) добавляются отдельно.
+  function buildSharedFields(fd) {
     fd.append('format', state.format);
     if (state.format === 'png') fd.append('png_level', state.pngLevel);
     else fd.append('quality', state.quality);
@@ -753,22 +879,37 @@
       fd.append('watermark_position', state.wmPosition);
       fd.append('watermark_opacity', state.wmOpacity);
     }
+  }
+
+  function buildFormData() {
+    const fd = new FormData();
+    const isBatch = state.files.length > 1;
+
+    if (isBatch) {
+      state.files.forEach(file => fd.append('files', file));
+    } else {
+      fd.append('file', state.files[0]);
+    }
+    buildSharedFields(fd);
     return fd;
   }
 
   function startProcessing() {
+    const isBatch = state.files.length > 1;
+
     frameResult.classList.add('show');
     document.getElementById('frame-counter').textContent = '03';
     resultPanel.classList.remove('show');
+    batchResultPanel.classList.remove('show');
     resultDot.classList.remove('on');
     setProgress(0);
     progressStrip.classList.remove('processing');
     statusLine.className = 'status-line';
-    statusLine.textContent = 'Отправка файла…';
+    statusLine.textContent = isBatch ? `Отправка ${state.files.length} файлов…` : 'Отправка файла…';
     frameResult.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
 
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/convert');
+    xhr.open('POST', isBatch ? '/api/convert-batch' : '/api/convert');
 
     xhr.upload.addEventListener('progress', (e) => {
       if (!e.lengthComputable) return;
@@ -777,7 +918,7 @@
     xhr.upload.addEventListener('load', () => {
       setProgress(100);
       progressStrip.classList.add('processing');
-      statusLine.textContent = 'Файл на сервере, обработка…';
+      statusLine.textContent = isBatch ? 'Файлы на сервере, обработка…' : 'Файл на сервере, обработка…';
     });
 
     xhr.addEventListener('load', () => {
@@ -786,18 +927,21 @@
       let data;
       try { data = JSON.parse(xhr.responseText); } catch { data = null; }
 
-      if (xhr.status >= 200 && xhr.status < 300 && data && data.download_url) {
-        onSuccess(data);
-      } else {
+      if (xhr.status < 200 || xhr.status >= 300 || !data) {
         const msg = (data && data.error) ? data.error : `Сервер ответил ошибкой (${xhr.status}).`;
         onError(msg);
+        return;
       }
+
+      if (isBatch) onBatchSuccess(data);
+      else if (data.download_url) onSuccess(data);
+      else onError('Сервер не вернул ссылку на результат.');
     });
 
     xhr.addEventListener('error', () => {
       submitBtn.disabled = false;
       progressStrip.classList.remove('processing');
-      onError('Не удалось связаться с сервером. Проверьте, что бэкенд POST /api/convert запущен и доступен.');
+      onError('Не удалось связаться с сервером. Проверьте, что бэкенд запущен и доступен.');
     });
 
     xhr.send(buildFormData());
@@ -822,6 +966,60 @@
     resultPanel.classList.add('show');
   }
 
+  // onBatchSuccess строит список строк результата - по одной на файл,
+  // с индивидуальной ссылкой на скачивание или сообщением об ошибке,
+  // плюс общую ссылку на zip-архив, если сервер её вернул.
+  function onBatchSuccess(data) {
+    const results = data.results || [];
+    const okCount = results.filter(r => !r.error).length;
+    const failCount = results.length - okCount;
+
+    resultDot.classList.add('on');
+    statusLine.className = failCount > 0 ? 'status-line error' : 'status-line done';
+    statusLine.textContent = failCount > 0
+      ? `Готово: ${okCount} успешно, ${failCount} с ошибкой.`
+      : `Готово. Проявлено файлов: ${okCount}.`;
+
+    batchResultList.innerHTML = '';
+    results.forEach(r => {
+      const li = document.createElement('li');
+      li.className = 'batch-result-row' + (r.error ? ' error' : '');
+
+      if (r.error) {
+        li.innerHTML = `
+          <span class="name">${escapeHTML(r.filename)}</span>
+          <span class="error-msg">${escapeHTML(r.error)}</span>
+        `;
+      } else {
+        const reduction = r.size_before > 0 ? Math.round((1 - r.size_after / r.size_before) * 100) : 0;
+        const reductionHTML = r.size_before > 0 ? ` <span class="reduction">-${reduction}%</span>` : '';
+        li.innerHTML = `
+          <img class="thumb" src="${r.download_url}" alt="" />
+          <span class="name">${escapeHTML(r.filename)}</span>
+          <span class="stat">${formatBytes(r.size_before)} → ${formatBytes(r.size_after)}${reductionHTML}</span>
+          <a href="${r.download_url}" download>Скачать</a>
+        `;
+      }
+      batchResultList.appendChild(li);
+    });
+
+    if (data.archive_url) {
+      archiveDownloadLink.style.display = '';
+      archiveDownloadLink.href = data.archive_url;
+      archiveDownloadLink.setAttribute('download', 'result.zip');
+    } else {
+      archiveDownloadLink.style.display = 'none';
+    }
+
+    batchResultPanel.classList.add('show');
+  }
+
+  function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
   function onError(message) {
     statusLine.className = 'status-line error';
     statusLine.textContent = message;
@@ -833,16 +1031,23 @@
   }
 
   resetBtn.addEventListener('click', resetAll);
+  batchResetBtn.addEventListener('click', resetAll);
 
   function resetAll() {
-    state.file = null;
+    revokeObjectURLs();
+    state.files = [];
     fileInput.value = '';
     fileChip.classList.remove('show');
     frameSettings.classList.remove('show');
     frameResult.classList.remove('show');
+    resultPanel.classList.remove('show');
+    batchResultPanel.classList.remove('show');
     document.getElementById('frame-counter').textContent = '01';
     settingsForm.reset();
     cropOverlay.classList.remove('show');
+    batchGrid.classList.remove('show');
+    batchNote.classList.remove('show');
+    previewWrap.classList.remove('hidden');
   }
 
   // ---------- утилиты ----------
